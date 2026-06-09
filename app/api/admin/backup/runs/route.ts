@@ -8,6 +8,8 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+export const dynamic = 'force-dynamic';
+
 interface RunRow {
   id: string;
   started_at: string;

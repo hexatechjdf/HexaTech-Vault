@@ -18,6 +18,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/config";
 import { getClientIp } from "@/lib/server/client-ip";
 
+export const dynamic = 'force-dynamic';
+
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }

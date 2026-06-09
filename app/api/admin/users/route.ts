@@ -26,6 +26,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
 import type { Role } from "@/lib/types";
 
+export const dynamic = 'force-dynamic';
+
 const VALID_ROLES: Role[] = ["super_admin", "admin", "manager", "team_lead", "lead_dev", "team_member"];
 
 interface CreateBody {

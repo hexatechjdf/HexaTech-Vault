@@ -12,6 +12,8 @@
 import { NextResponse } from "next/server";
 import { callEdgeFunction } from "@/lib/server/call-edge";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const r = await callEdgeFunction({ name: "drive-purge", method: "POST", body });

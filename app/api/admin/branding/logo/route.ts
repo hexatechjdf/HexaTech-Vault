@@ -14,6 +14,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
 
+export const dynamic = 'force-dynamic';
+
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 const ALLOWED_MIME = new Set([
   "image/png",

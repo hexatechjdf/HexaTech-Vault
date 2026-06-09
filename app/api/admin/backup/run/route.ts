@@ -8,6 +8,8 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callEdgeFunction } from "@/lib/server/call-edge";
 
+export const dynamic = 'force-dynamic';
+
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }

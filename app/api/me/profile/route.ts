@@ -15,6 +15,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
 
+export const dynamic = 'force-dynamic';
+
 // Loose email pattern — Drive will be the real gate. We just guard against
 // obvious typos here.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

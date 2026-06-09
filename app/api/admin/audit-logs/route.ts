@@ -16,6 +16,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+export const dynamic = 'force-dynamic';
+
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
 }

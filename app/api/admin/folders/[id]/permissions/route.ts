@@ -9,6 +9,8 @@
 import { NextResponse } from "next/server";
 import { callEdgeFunction } from "@/lib/server/call-edge";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const r = await callEdgeFunction({
     name: "permissions-get",

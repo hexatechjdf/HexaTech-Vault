@@ -10,6 +10,8 @@
 import { NextResponse } from "next/server";
 import { callEdgeFunction } from "@/lib/server/call-edge";
 
+export const dynamic = 'force-dynamic';
+
 interface ConnectStartDTO {
   url: string;
 }

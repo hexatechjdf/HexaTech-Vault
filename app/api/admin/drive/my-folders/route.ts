@@ -8,6 +8,8 @@
 import { NextResponse } from "next/server";
 import { callEdgeFunction } from "@/lib/server/call-edge";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST() {
   const r = await callEdgeFunction({ name: "shared-with-me", method: "POST" });
   if (r.error) return NextResponse.json({ error: r.error }, { status: r.status });
