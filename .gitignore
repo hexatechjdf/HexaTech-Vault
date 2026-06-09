@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.env
+.env.local
+.env*.local
+out/
+*.tsbuildinfo
+.DS_Store
+
+# Claude Code — personal overrides (model, permissions, hooks)
+.claude/settings.local.json
+
+# Supabase CLI local state (link, version probes, branches)
+supabase/.temp/
+supabase/.branches/
+.supabase/

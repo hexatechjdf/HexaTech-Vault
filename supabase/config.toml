@@ -1,0 +1,120 @@
+# Supabase project config for HexaTech Vault.
+# Replace project_id with your own ref after `supabase link`.
+project_id = "hexatech-vault"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+# The site URL the app runs on; used by Auth for redirects/email links.
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = false          # users are provisioned by the admin (see seed.sql)
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
+
+[edge_runtime]
+enabled = true
+# Functions are invoked with the user's JWT; auth.ts re-verifies it.
+policy = "per_worker"
+
+# ---------------------------------------------------------------------------
+# Per-function config. verify_jwt = false for the OAuth callback (Google
+# redirects the browser to it with no Supabase JWT) and for sync-drive (the
+# cron calls it with a CRON_SECRET, not a JWT). All other functions verify the
+# JWT at the gateway AND again in code via requireUser().
+# ---------------------------------------------------------------------------
+[functions.drive-oauth-start]
+verify_jwt = true
+
+[functions.drive-oauth-callback]
+verify_jwt = false
+
+[functions.connection-status]
+verify_jwt = true
+
+[functions.sync-drive]
+verify_jwt = false
+
+[functions.drive-list]
+verify_jwt = true
+
+[functions.folder-create]
+verify_jwt = true
+
+[functions.drive-upload]
+verify_jwt = true
+
+[functions.drive-download]
+verify_jwt = true
+
+[functions.drive-delete]
+verify_jwt = true
+
+[functions.permissions-get]
+verify_jwt = true
+
+[functions.permissions-set]
+verify_jwt = true
+
+[functions.assignees-list]
+verify_jwt = true
+
+[functions.assignees-add]
+verify_jwt = true
+
+[functions.assignees-remove]
+verify_jwt = true
+
+[functions.shared-with-me]
+verify_jwt = true
+
+[functions.directory-departments]
+verify_jwt = true
+
+[functions.directory-users]
+verify_jwt = true
+
+[functions.drive-verify]
+verify_jwt = true
+
+# Cron-driven token refresh. pg_cron calls it with `Bearer <CRON_SECRET>`,
+# not a Supabase JWT - so we bypass the gateway's JWT check. The function
+# body validates the CRON_SECRET itself (or a super_admin JWT for manual
+# trigger from Settings).
+[functions.drive-refresh-token]
+verify_jwt = false
+
+# Super-Admin-only recovery of soft-deleted folders / files.
+[functions.drive-restore]
+verify_jwt = true
+
+# Super-Admin-only permanent delete from Trash (Drive files.delete + DB DELETE).
+[functions.drive-purge]
+verify_jwt = true
+
+# Cron-driven backup of the Postgres state to Supabase Storage. Triggered
+# either by pg_cron (Bearer CRON_SECRET) or by a super_admin from the
+# Settings → Backup tab. The function body validates both paths.
+[functions.backup-run]
+verify_jwt = false

@@ -1,0 +1,492 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+ * HexaTech Vault — global styles for the Next.js port.
+ * Merged from the Vite app's src/styles/{index,tailwind,fonts,theme}.css.
+ *
+ * Tailwind v4: `@import "tailwindcss"` brings in core + utilities; `@source`
+ * directs the JIT scanner to our app + components directories.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+@import "tailwindcss";
+@source "../app/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+
+@import "tw-animate-css";
+
+/* ─── Fonts ──────────────────────────────────────────────────────────────── */
+@import url("https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap");
+
+/* ─── App theme tokens (mirrors src/styles/theme.css) ────────────────────── */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  --background: #F5F7FA;
+  --foreground: oklch(0.145 0 0);
+  --card: #ffffff;
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #030213;
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.95 0.0058 264.53);
+  --secondary-foreground: #030213;
+  --muted: #ececf0;
+  --muted-foreground: #717182;
+  --accent: #e9ebef;
+  --accent-foreground: #030213;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --input: transparent;
+  --input-background: #f3f3f5;
+  --switch-background: #cbced4;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #030213;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /* ─── Brand tokens (live: overridden at runtime by BrandingApplier when
+   *     a super admin saves new colors in Settings → Company Info).
+   *     Hex literals across the codebase have been replaced with these
+   *     variables, so changing them re-paints the entire UI instantly. ─── */
+  --brand-primary: #1B2A4A;
+  --brand-accent: #C9A84C;
+  --brand-primary-light: #2a3f6e;
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Brand utilities: `bg-brand-primary`, `text-brand-accent`,
+   * `border-brand-primary-light`, etc. all resolve to the live CSS vars
+   * above, so changing brand colors at runtime repaints any element using
+   * them — whether the element styles it via a Tailwind class or an inline
+   * `var(--brand-primary)`. */
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-primary-light: var(--brand-primary-light);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Poppins', sans-serif;
+  }
+
+  /* Default typography styles. Tailwind utility classes override these. */
+  html { font-size: var(--font-size); }
+  h1 { font-size: var(--text-2xl); font-weight: var(--font-weight-medium); line-height: 1.5; }
+  h2 { font-size: var(--text-xl);  font-weight: var(--font-weight-medium); line-height: 1.5; }
+  h3 { font-size: var(--text-lg);  font-weight: var(--font-weight-medium); line-height: 1.5; }
+  h4 { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+  label { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+  button { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+  input { font-size: var(--text-base); font-weight: var(--font-weight-normal); line-height: 1.5; }
+}
+
+/* Ensure the app fills the viewport (was in index.html). */
+html, body { height: 100%; margin: 0; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Reusable brand-tinted scrollbar.
+ *
+ * Apply `className="brand-scroll"` to any scrollable container (typically one
+ * with overflow-y/x: auto) to replace the default OS scrollbar with a slim
+ * brand-coloured track + gradient thumb. Reads --brand-accent and
+ * --brand-primary from CSS vars so it repaints automatically when Super
+ * Admin changes brand colors in Settings.
+ *
+ * Examples:
+ *   <div className="brand-scroll" style={{ maxHeight: 400, overflowY: "auto" }}>
+ *     ...long list...
+ *   </div>
+ *
+ * Implementation notes:
+ *   - Firefox uses the scrollbar-width / scrollbar-color rule.
+ *   - WebKit/Chromium uses the ::-webkit-scrollbar-* pseudo-elements.
+ *   Both targets are required to cover every supported browser.
+ *
+ * Tip: add `paddingRight: 6px` (or similar) on the container so content has
+ * clearance from the scrollbar gutter.
+ * ───────────────────────────────────────────────────────────────────────────── */
+.brand-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-accent, #C9A84C) transparent;
+}
+
+.brand-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.brand-scroll::-webkit-scrollbar-track {
+  background: #f4f5f7;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.brand-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--brand-accent, #C9A84C), color-mix(in srgb, var(--brand-primary, #1B2A4A) 70%, var(--brand-accent, #C9A84C)));
+  border-radius: 8px;
+  border: 2px solid #f4f5f7;
+  min-height: 28px;
+  transition: background 160ms ease-in-out;
+}
+
+.brand-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-accent, #C9A84C) 90%, #000),
+                                       color-mix(in srgb, var(--brand-primary, #1B2A4A) 80%, var(--brand-accent, #C9A84C)));
+}
+
+.brand-scroll::-webkit-scrollbar-thumb:active {
+  background: var(--brand-primary, #1B2A4A);
+}
+
+/* Hide the corner where horizontal + vertical scrollbars would intersect. */
+.brand-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Loader & skeleton animations.
+ *
+ * Used by <Loader>, <Skeleton>, <SkeletonRow> in components/Loader.tsx.
+ *   .skeleton-shimmer   - light wave sweeping across a placeholder block
+ *   .loader-spin        - continuous rotation for the ring spinner
+ *   .loader-text-pulse  - subtle opacity pulse on the spinner caption
+ *
+ * All three are gated by prefers-reduced-motion so users who request reduced
+ * motion get a static placeholder instead of any continuous animation.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes loader-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes loader-text-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+.skeleton-shimmer {
+  background:
+    linear-gradient(
+      90deg,
+      #eef0f4 0%,
+      #f7f8fb 45%,
+      color-mix(in srgb, var(--brand-accent, #C9A84C) 14%, #f7f8fb) 50%,
+      #f7f8fb 55%,
+      #eef0f4 100%
+    );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.loader-spin {
+  animation: loader-spin 850ms linear infinite;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.loader-text-pulse {
+  animation: loader-text-pulse 1.8s ease-in-out infinite;
+  will-change: opacity;
+}
+
+/* Respect users who prefer reduced motion. Skeleton becomes a static block;
+ * spinner stops moving; caption sits at a calm 0.75 opacity. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+    background: #eef0f4;
+  }
+  .loader-spin {
+    animation: none;
+  }
+  .loader-text-pulse {
+    animation: none;
+    opacity: 0.75;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Pending border-trace — animates a line around the perimeter of a control
+ * while an async action is in flight. Uses the standard SVG technique:
+ * `<rect>` with `pathLength="100"` + `stroke-dasharray` + animated
+ * `stroke-dashoffset`. Works correctly with rounded corners — set `rx` on
+ * the rect to match the wrapped control's border-radius.
+ *
+ * Usage:
+ *   <span className="pending-border-trace">
+ *     <svg className="pending-border-trace-svg" aria-hidden>
+ *       <rect x="0" y="0" width="100%" height="100%" rx="8" ry="8" pathLength="100" />
+ *     </svg>
+ *     <select ... />
+ *   </span>
+ *
+ * Override colour via inline CSS var on the wrapper:
+ *   style={{ "--trace-color": "#3b82f6" }}   // blue
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+@keyframes pending-border-trace-draw {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0;   }
+}
+
+.pending-border-trace {
+  --trace-color: #10b981;
+  position: relative;
+  display: inline-block;
+  border-radius: 8px;
+}
+
+.pending-border-trace-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pending-border-trace-svg rect {
+  fill: none;
+  stroke: var(--trace-color);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-dasharray: 30 70;
+  animation: pending-border-trace-draw 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-border-trace-svg rect {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Brand toast — re-styles `sonner` toasts so they match the rest of the app:
+ * white card, 14px radius, Poppins, navy-tinted shadow, and a 4px coloured
+ * accent stripe on the left whose hue encodes the toast type. Sonner sets
+ * `[data-type="success|error|info|warning|loading"]` on each toast root, so
+ * we drive the stripe colour from a single CSS var.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+[data-sonner-toaster][data-sonner-toaster] {
+  --width: 360px;
+  --gap: 10px;
+  /* Push the stack slightly off the viewport edge so the cards don't clip the
+   * gold accent stripe at the left or the shadow at the right. */
+  --offset: 18px;
+  font-family: 'Poppins', sans-serif;
+}
+
+[data-sonner-toast].brand-toast {
+  --toast-accent: var(--brand-primary);
+  /* Layered shadow: a tight ambient + a long navy-tinted drop, same recipe
+   * the StatCards use on hover so the toasts feel native to the surface. */
+  background: #ffffff !important;
+  color: var(--brand-primary) !important;
+  border: 1px solid #eef0f4 !important;
+  border-radius: 14px !important;
+  padding: 14px 16px 14px 20px !important;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px rgba(27, 42, 74, 0.15) !important;
+  /* Left accent stripe — drawn via inset box-shadow to avoid disturbing the
+   * card border-radius. Width = 4px. */
+  position: relative;
+  overflow: hidden;
+}
+
+/* The stripe + a faint stripe-tinted glow behind it. */
+[data-sonner-toast].brand-toast::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--toast-accent);
+}
+
+/* Per-type accent colour. Sonner adds data-type to the toast root. */
+[data-sonner-toast].brand-toast[data-type="success"] { --toast-accent: #22c55e; }
+[data-sonner-toast].brand-toast[data-type="error"]   { --toast-accent: #ef4444; }
+[data-sonner-toast].brand-toast[data-type="warning"] { --toast-accent: #f59e0b; }
+[data-sonner-toast].brand-toast[data-type="info"]    { --toast-accent: var(--brand-accent); }
+[data-sonner-toast].brand-toast[data-type="loading"] { --toast-accent: var(--brand-primary); }
+
+/* Title text — slightly bolder and tighter than the description. */
+[data-sonner-toast].brand-toast [data-title] {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: var(--brand-primary) !important;
+  letter-spacing: 0.1px;
+}
+
+[data-sonner-toast].brand-toast [data-description] {
+  font-size: 12px !important;
+  color: #6b7280 !important;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+/* Sonner's built-in icon slot. We give it a soft chip background so it
+ * matches the icon tiles used on dashboard cards / file rows. */
+[data-sonner-toast].brand-toast [data-icon] {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 9px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: color-mix(in srgb, var(--toast-accent) 12%, transparent) !important;
+  color: var(--toast-accent) !important;
+  margin-right: 12px !important;
+  flex-shrink: 0;
+}
+
+[data-sonner-toast].brand-toast [data-icon] svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* Close button — ghost circle. Only visible on hover to keep the card calm. */
+[data-sonner-toast].brand-toast [data-close-button] {
+  background: #f4f5f7 !important;
+  border: 1px solid #eef0f4 !important;
+  color: #6b7280 !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 999px !important;
+  top: 10px !important;
+  left: auto !important;
+  right: 10px !important;
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+[data-sonner-toast].brand-toast:hover [data-close-button],
+[data-sonner-toast].brand-toast:focus-within [data-close-button] {
+  opacity: 1;
+}
+
+[data-sonner-toast].brand-toast [data-close-button]:hover {
+  background: var(--brand-primary) !important;
+  color: #ffffff !important;
+}
+
+/* Action / cancel buttons inside a toast (e.g. toast.success("Saved", { action: ... }))
+ * get the same pill treatment used elsewhere in Settings. */
+[data-sonner-toast].brand-toast [data-button] {
+  background: var(--brand-primary) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 6px 12px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  font-family: 'Poppins', sans-serif !important;
+}
+
+[data-sonner-toast].brand-toast [data-button][data-cancel] {
+  background: #f4f5f7 !important;
+  color: var(--brand-primary) !important;
+}
