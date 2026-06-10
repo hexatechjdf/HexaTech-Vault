@@ -126,6 +126,14 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
   const unreadCount = notifs.filter(n => !n.read).length;
   const roleLabel = ROLE_LABELS[user.role];
   const roleBadgeColor = ROLE_BADGE_COLORS[user.role];
+  // roleBadgeColor for super_admin is `var(--brand-accent)` (so brand re-coloring
+  // works), but every other role is a hex literal. Concatenating alpha bytes
+  // (e.g. `${color}cc`) yields valid 8-char hex for the literals but invalid
+  // CSS like `var(--brand-accent)cc` for super_admin — which renders as no
+  // background and the white pill behind it shows through. color-mix() works
+  // uniformly for both forms, so all translucent variants go through this.
+  const roleBadgeAlpha = (pct: number) =>
+    `color-mix(in srgb, ${roleBadgeColor} ${pct}%, transparent)`;
 
   // Live branding (cached + refetched after Settings save).
   const { data: branding } = useBranding();
@@ -195,7 +203,7 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
         {!sidebarCollapsed && (
           <div style={{ padding: "14px 20px 10px" }}>
             <div style={{ background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: "8px", padding: "8px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: `linear-gradient(135deg, ${roleBadgeColor}cc, ${roleBadgeColor})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, color: "white", flexShrink: 0 }}>{user.avatar}</div>
+              <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: `linear-gradient(135deg, ${roleBadgeAlpha(80)}, ${roleBadgeColor})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, color: "white", flexShrink: 0 }}>{user.avatar}</div>
               <div style={{ overflow: "hidden", flex: 1 }}>
                 <div style={{ color: "white", fontSize: "12px", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
                 <div style={{ color: roleBadgeColor, fontSize: "10px", opacity: 0.9 }}>{roleLabel}</div>
@@ -283,7 +291,7 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
           </div>
 
           {/* Role chip */}
-          <div style={{ padding: "4px 10px", borderRadius: "20px", background: `${roleBadgeColor}15`, border: `1px solid ${roleBadgeColor}30`, fontSize: "11px", fontWeight: 600, color: roleBadgeColor, fontFamily: "'Poppins', sans-serif" }}>
+          <div style={{ padding: "4px 10px", borderRadius: "20px", background: roleBadgeAlpha(8), border: `1px solid ${roleBadgeAlpha(18)}`, fontSize: "11px", fontWeight: 600, color: roleBadgeColor, fontFamily: "'Poppins', sans-serif" }}>
             {roleLabel}
           </div>
 
@@ -366,7 +374,7 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
           <div style={{ position: "relative" }}>
             <button onClick={() => { setProfileOpen(!profileOpen); setNotifOpen(false); }}
               style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 10px 6px 6px", border: "1.5px solid #f0f0f0", borderRadius: "12px", background: "#f8f9fc", cursor: "pointer" }}>
-              <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: `linear-gradient(135deg, ${roleBadgeColor}cc, ${roleBadgeColor})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700, color: "white" }}>{user.avatar}</div>
+              <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: `linear-gradient(135deg, ${roleBadgeAlpha(80)}, ${roleBadgeColor})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700, color: "white" }}>{user.avatar}</div>
               <div style={{ textAlign: "left" }}>
                 <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", lineHeight: 1.2 }}>{user.name.split(" ")[0]}</div>
                 <div style={{ fontSize: "10px", color: "#9ca3af", fontFamily: "'Poppins', sans-serif" }}>{roleLabel}</div>
@@ -379,7 +387,7 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
                 <div style={{ padding: "16px", borderBottom: "1px solid #f4f5f7", background: "linear-gradient(135deg, color-mix(in srgb, var(--brand-primary) 3%, transparent), color-mix(in srgb, var(--brand-primary) 2%, transparent))" }}>
                   <div style={{ fontWeight: 600, color: "var(--brand-primary)", fontSize: "13px", fontFamily: "'Poppins', sans-serif" }}>{user.name}</div>
                   <div style={{ color: "#9ca3af", fontSize: "11px", fontFamily: "'Poppins', sans-serif" }}>{user.email}</div>
-                  <div style={{ marginTop: "6px", display: "inline-flex", padding: "2px 8px", background: `${roleBadgeColor}15`, borderRadius: "10px", fontSize: "10px", fontWeight: 600, color: roleBadgeColor, fontFamily: "'Poppins', sans-serif" }}>
+                  <div style={{ marginTop: "6px", display: "inline-flex", padding: "2px 8px", background: roleBadgeAlpha(8), borderRadius: "10px", fontSize: "10px", fontWeight: 600, color: roleBadgeColor, fontFamily: "'Poppins', sans-serif" }}>
                     {roleLabel}
                   </div>
                 </div>

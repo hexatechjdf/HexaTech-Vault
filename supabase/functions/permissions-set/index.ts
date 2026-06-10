@@ -190,6 +190,45 @@ Deno.serve(async (req) => {
 
     // ---- App side ----
     //
+    // Role grants with level=no_access are treated as "clear the slot" instead
+    // of "explicit revocation". Picking "No Access" in the FAC dropdown is the
+    // default state for any role/dept combination that has no grant, so storing
+    // an actual row for it produced a hidden blocker: the user-wins engine sees
+    // the row at the nearest ancestor and stops walking, returning no_access
+    // even when an ancestor folder had a positive role grant. Deleting the row
+    // makes "No Access" mean "no grant exists", which matches the dropdown's
+    // visual semantics.
+    //
+    // User grants are NOT affected — explicit no_access for a specific user
+    // is a documented revocation feature (see .claude/rules/permissions.md).
+    if (principalType === "role" && level === "no_access") {
+      const delQuery = svc
+        .from("permission_grants")
+        .delete()
+        .eq("folder_id", folderId)
+        .eq("principal_type", "role")
+        .eq("principal_id", principalId);
+      if (principalDeptId === null) {
+        delQuery.is("principal_dept_id", null);
+      } else {
+        delQuery.eq("principal_dept_id", principalDeptId);
+      }
+      const { error: delErr } = await delQuery;
+      if (delErr) throw new HttpError(500, "Failed to clear grant");
+
+      await writeAudit({
+        actorId: user.id,
+        action: "perm.revoke",
+        resourceType: "permission",
+        resourceId: folderId,
+        details: { folderId, principalType, principalId, principalDeptId, level: "no_access" },
+        ipAddress: clientIp(req),
+      });
+
+      return jsonResponse({ ok: true, cleared: true });
+    }
+
+    //
     // The composite uniqueness lives in the partial unique index
     // `permission_grants_unique_principal` (migration 0021) on
     // (folder_id, principal_type, principal_id, COALESCE(principal_dept_id, sentinel)).

@@ -491,7 +491,11 @@ export class MockBackend implements Backend {
         g.principalId === pid &&
         (g.principalDeptId ?? null) === (principalDeptId ?? null),
     );
-    if (level === "no_access") {
+    // Role + no_access = "clear the slot", not "explicit revocation". Matches
+    // the supabase backend (permissions-set Edge Function). User + no_access
+    // remains an explicit revocation and is stored as a row (documented in
+    // .claude/rules/permissions.md).
+    if (level === "no_access" && pt === "role") {
       this.db.grants = this.db.grants.filter((g) => g !== existing);
       return;
     }

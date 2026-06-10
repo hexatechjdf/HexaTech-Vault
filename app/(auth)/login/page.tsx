@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { LoginPage } from "@/components/LoginPage";
 import { loginAction } from "./actions";
+import { forgotPasswordAction } from "../forgot-password/actions";
 
 function LoginInner() {
   const params = useSearchParams();
@@ -23,7 +24,17 @@ function LoginInner() {
     if (result?.error) toast.error(result.error);
   };
 
-  return <LoginPage onSubmitCredentials={handleCredentialsSubmit} />;
+  // Forwards the email to the forgot-password server action. Whatever it
+  // returns (error / notice / retryAfterSeconds) is passed through to
+  // LoginPage's handler which already knows how to render each shape.
+  const handleForgotPassword = (email: string) => forgotPasswordAction(email);
+
+  return (
+    <LoginPage
+      onSubmitCredentials={handleCredentialsSubmit}
+      onForgotPassword={handleForgotPassword}
+    />
+  );
 }
 
 // Next requires useSearchParams() consumers to be wrapped in <Suspense> so the

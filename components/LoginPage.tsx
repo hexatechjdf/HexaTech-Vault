@@ -8,13 +8,25 @@ import { useBranding } from "@/lib/queries/branding";
 // Fallback logo when branding hasn't loaded yet or no custom logo is set.
 const FALLBACK_LOGO = "/imports/HTS_Logo.png";
 
+export interface ForgotPasswordOutcome {
+  /** Set when the input itself was malformed. Surfaced inline as a toast. */
+  error?: string;
+  /** Generic confirmation copy — shown whether or not the email exists. */
+  notice?: string;
+  /** When the per-email cooldown is active, the seconds left until retry. */
+  retryAfterSeconds?: number;
+}
+
 interface LoginPageProps {
   /** Real auth handler — wired in app/(auth)/login/page.tsx to the
    *  Supabase signInWithPassword server action. */
   onSubmitCredentials?: (email: string, password: string) => void | Promise<void>;
+  /** Real forgot-password handler — wired in app/(auth)/login/page.tsx to the
+   *  forgotPasswordAction server action. Enforces a per-email cooldown server-side. */
+  onForgotPassword?: (email: string) => Promise<ForgotPasswordOutcome>;
 }
 
-export function LoginPage({ onSubmitCredentials }: LoginPageProps) {
+export function LoginPage({ onSubmitCredentials, onForgotPassword }: LoginPageProps) {
   // Live branding (logo + company name). The /api/admin/branding GET is
   // intentionally public, so this works on the unauthenticated /login page.
   const { data: branding } = useBranding();
@@ -42,16 +54,40 @@ export function LoginPage({ onSubmitCredentials }: LoginPageProps) {
     }
   };
 
-  const handleForgotPassword = (e: React.FormEvent) => {
+  const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail) { toast.error("Please enter your email address"); return; }
     if (!forgotEmail.includes("@")) { toast.error("Please enter a valid email address"); return; }
+
     setForgotLoading(true);
-    setTimeout(() => {
-      setForgotLoading(false);
+    try {
+      // Real action wired in (auth)/login/page.tsx → forgotPasswordAction.
+      // Mock mode (no prop wired) falls back to a local stub so the page is
+      // still demoable without a backend.
+      const result = onForgotPassword
+        ? await onForgotPassword(forgotEmail)
+        : { notice: `Password reset email sent to ${forgotEmail} (mock)` };
+
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+
+      // Cooldown-active path: the server already silently no-op'd. Tell the
+      // user how long until they can ask again so they don't keep spamming.
+      if (typeof result.retryAfterSeconds === "number") {
+        toast.info(
+          `A reset link was already sent recently. You can request another in ${result.retryAfterSeconds}s.`,
+        );
+      }
+
       setForgotSent(true);
-      toast.success(`Password reset email sent to ${forgotEmail}`);
-    }, 1200);
+      if (result.notice && !result.retryAfterSeconds) toast.success(result.notice);
+    } catch (err) {
+      toast.error((err as Error)?.message || "Could not send reset email. Please try again.");
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   return (

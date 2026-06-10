@@ -20,6 +20,7 @@ import { Mail, Lock, ShieldCheck, Save, KeyRound, AlertCircle, Cloud } from "luc
 import { toast } from "sonner";
 import { useChangePassword, useMyProfile, useUpdateProfile } from "@/lib/queries/profile";
 import { useDriveStatus } from "@/lib/queries/drive";
+import { Skeleton } from "@/components/Loader";
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: "Super Admin",
@@ -139,9 +140,75 @@ export function ProfilePage() {
   }
 
   if (profileQ.isLoading) {
+    // Skeleton mockup that mirrors the real page shape (Identity card + Password
+    // card) so the layout doesn't jump when data lands. Same Skeleton primitive
+    // used by the dashboards and the Settings → Backup runs table.
     return (
-      <div style={{ padding: "28px 32px", fontFamily: "'Poppins', sans-serif" }}>
-        <p style={{ color: "#9ca3af", fontSize: "13px" }}>Loading your profile…</p>
+      <div style={{ padding: "28px 32px", fontFamily: "'Poppins', sans-serif", maxWidth: "780px" }}>
+        {/* Header */}
+        <div style={{ marginBottom: "24px" }}>
+          <Skeleton width={150} height={22} rounded="md" style={{ marginBottom: "8px" }} />
+          <Skeleton width={340} height={11} rounded="md" />
+        </div>
+
+        {/* Identity card */}
+        <div style={card}>
+          <Skeleton width={90} height={17} rounded="md" style={{ marginBottom: "18px" }} />
+
+          {/* Display name */}
+          <div style={{ marginBottom: "16px" }}>
+            <Skeleton width={92} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+            <Skeleton width="100%" height={40} rounded="lg" />
+          </div>
+
+          {/* Login email */}
+          <div style={{ marginBottom: "16px" }}>
+            <Skeleton width={80} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+            <Skeleton width="100%" height={40} rounded="lg" />
+            <div style={{ marginTop: "8px" }}>
+              <Skeleton width={260} height={10} rounded="md" />
+            </div>
+          </div>
+
+          {/* Google Drive email / connection */}
+          <div style={{ marginBottom: "16px" }}>
+            <Skeleton width={140} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+            <Skeleton width="100%" height={40} rounded="lg" />
+            <div style={{ marginTop: "8px" }}>
+              <Skeleton width={300} height={10} rounded="md" />
+            </div>
+          </div>
+
+          {/* Role + Department grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "20px" }}>
+            <div>
+              <Skeleton width={40} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+              <Skeleton width="100%" height={40} rounded="lg" />
+            </div>
+            <div>
+              <Skeleton width={80} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+              <Skeleton width="100%" height={40} rounded="lg" />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Skeleton width={140} height={38} rounded="lg" />
+          </div>
+        </div>
+
+        {/* Password card */}
+        <div style={card}>
+          <Skeleton width={140} height={17} rounded="md" style={{ marginBottom: "18px" }} />
+          {[0, 1, 2].map((i) => (
+            <div key={i} style={{ marginBottom: "14px" }}>
+              <Skeleton width={130} height={11} rounded="md" style={{ marginBottom: "8px" }} />
+              <Skeleton width="100%" height={40} rounded="lg" />
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "4px" }}>
+            <Skeleton width={170} height={38} rounded="lg" />
+          </div>
+        </div>
       </div>
     );
   }
