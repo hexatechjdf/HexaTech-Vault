@@ -18,8 +18,24 @@ Deno.serve(async (req) => {
     const { folderId } = body;
     if (!folderId) return errorResponse("folderId is required", 400);
 
-    // Manage-access gate (full_control); super_admin passes via the engine.
-    await requirePermission(user.id, folderId, "manage_access");
+    // Access gate.
+    //
+    // Three ways to pass:
+    //   1. Super Admin — passes via the engine short-circuit inside
+    //      requirePermission (full_control everywhere).
+    //   2. folder_access:view OR action at the tab level. A Super Admin
+    //      can delegate "you can see folder permissions" by granting
+    //      folder_access:view on the Tab Access Control screen.
+    //   3. Legacy path: caller has manage_access (full_control) on the folder.
+    const { data: tabLevelData } = await serviceClient().rpc(
+      "get_effective_tab_level",
+      { p_user: user.id, p_tab: "folder_access" },
+    );
+    const tabLevel = (tabLevelData as string | null) ?? "no_access";
+    const tabSatisfies = tabLevel === "view" || tabLevel === "action";
+    if (user.role !== "super_admin" && !tabSatisfies) {
+      await requirePermission(user.id, folderId, "manage_access");
+    }
 
     const svc = serviceClient();
     const { data: rows } = await svc

@@ -113,8 +113,21 @@ verify_jwt = true
 [functions.drive-purge]
 verify_jwt = true
 
+# Sample-proposal clone: creates a new project folder under the existing
+# "Proposal" folder and copies the chosen sample file into it.
+[functions.proposal-clone]
+verify_jwt = true
+
 # Cron-driven backup of the Postgres state to Supabase Storage. Triggered
 # either by pg_cron (Bearer CRON_SECRET) or by a super_admin from the
 # Settings → Backup tab. The function body validates both paths.
 [functions.backup-run]
 verify_jwt = false
+
+# Tab permission system (migration 0026). Both endpoints are super-admin only;
+# the function bodies re-verify the caller's role on each request.
+[functions.tab-permissions-get]
+verify_jwt = true
+
+[functions.tab-permissions-set]
+verify_jwt = true

@@ -1,14 +1,24 @@
 -- =============================================================================
--- seed.sql — demo departments + app_users for HexaTech Vault.
--- Deterministic UUIDs so the frontend and Supabase Auth can reference them.
+-- seed.sql
 --
--- IMPORTANT: app_users.id REFERENCES auth.users(id). You MUST create matching
--- Supabase Auth users with the SAME UUIDs listed below BEFORE (or together
--- with) this seed, otherwise the app_users inserts will fail the FK.
--- See SETUP.md "Create auth users" for the exact CLI/SQL commands. The auth
--- user's id must equal the app_user id; the email must match too.
+-- DEPRECATED FOR FRESH INSTALLS.
+-- -----------------------------------------------------------------------------
+-- 1. The four canonical departments are now created by migration 0004
+--    (renamed by 0014). Running this file's `insert into departments`
+--    block is harmless (ON CONFLICT (id) DO NOTHING) but redundant — and
+--    its hardcoded UUIDs do NOT match the auto-generated ones from 0004,
+--    so this file's app_users inserts will then reference dept UUIDs that
+--    don't exist and fail their FK.
+-- 2. The app_users inserts ALSO reference auth.users UUIDs that don't
+--    exist on a fresh install (Supabase Auth assigns its own). On a fresh
+--    project, app_users would fail the FK to auth.users(id) and the whole
+--    seed transaction would roll back.
 --
--- Emails follow the project convention <first>@hexatech.io (from src/app/App.tsx).
+-- Bottom line: DO NOT RUN THIS ON A FRESH INSTALL. Use
+--   1) `supabase db push`                             (runs migrations)
+--   2) Create the Super Admin via Authentication → Users in the Dashboard
+--   3) `bootstrap_super_admin.sql`                    (links auth -> app_users)
+-- ...then create everyone else through the app's User Management screen.
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------

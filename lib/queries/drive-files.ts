@@ -324,3 +324,55 @@ export function usePurgeItem() {
     },
   });
 }
+
+// ─── Proposal clone ─────────────────────────────────────────────────────────
+
+export interface CloneProposalInput {
+  /** DB id of the sample file being cloned. */
+  sourceFileId: string;
+  /** End-client / customer name for the new project. */
+  clientName: string;
+  /** Project / engagement title. */
+  projectTitle: string;
+}
+
+export interface ClonedProposalResult {
+  ok: true;
+  folder: {
+    id: string;
+    driveFileId: string;
+    name: string;
+    parentId: string;
+  };
+  file: {
+    id: string;
+    driveFileId: string;
+    name: string;
+    mimeType: string | null;
+    webViewLink: string | null;
+  };
+}
+
+async function postCloneProposal(input: CloneProposalInput): Promise<ClonedProposalResult> {
+  const res = await fetch("/api/admin/drive/proposals/clone", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return asJson<ClonedProposalResult>(res, "Failed to clone proposal");
+}
+
+/**
+ * Clones a sample proposal file into a brand-new project folder.
+ * On success invalidates every drive listing so the new project folder
+ * appears immediately inside the Proposal folder.
+ */
+export function useCloneProposal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: postCloneProposal,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: driveFilesQueryKeys.allLists });
+    },
+  });
+}

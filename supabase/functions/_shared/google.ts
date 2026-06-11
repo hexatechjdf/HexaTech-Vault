@@ -225,6 +225,31 @@ export async function createFileMetadata(
 }
 
 /**
+ * Copies an existing Drive file into newParentId with a new name. The Drive
+ * `files.copy` endpoint preserves the source's mimeType + binary content (or
+ * Docs/Sheets revision history) and returns the new file's metadata.
+ *
+ * Used by proposal-clone to duplicate a sample proposal file into a freshly
+ * created project folder.
+ */
+export async function copyFile(
+  accessToken: string,
+  sourceFileId: string,
+  newName: string,
+  newParentId: string,
+): Promise<DriveFile> {
+  return driveJson(
+    accessToken,
+    `/files/${sourceFileId}/copy?fields=${FILE_FIELDS}&supportsAllDrives=true`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName, parents: [newParentId] }),
+    },
+  );
+}
+
+/**
  * Multipart upload of small base64 content. Adequate for small files only.
  * TODO: implement true RESUMABLE upload for large files
  * (https://developers.google.com/drive/api/guides/manage-uploads#resumable).

@@ -18,10 +18,11 @@ import { createPortal } from "react-dom";
 import {
   Upload, FolderPlus, FileText, Folder as FolderIcon, ChevronRight,
   RefreshCw, MoreVertical, Trash2, Download, X, ExternalLink, ArrowLeft, Check,
-  ShieldCheck, UserPlus, Undo2, ChevronDown,
+  ShieldCheck, UserPlus, Undo2, ChevronDown, Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/queries/branding";
 import {
   useDriveList,
   useCreateFolder,
@@ -33,9 +34,11 @@ import {
   useTrash,
   useRestoreItem,
   usePurgeItem,
+  useCloneProposal,
   type TrashItem,
 } from "@/lib/queries/drive-files";
 import { useFolderPermissions, useSetPermission, useRevokePermission } from "@/lib/queries/permissions";
+import { useCanAct } from "@/lib/queries/tab-permissions";
 import { useUsers, useDepartments } from "@/lib/queries/users";
 import { Pagination } from "@/components/Pagination";
 import { Loader, SkeletonRows } from "@/components/Loader";
@@ -125,6 +128,16 @@ export function FileManager(_props: FileManagerProps) {
   const currentFolder = myFoldersMode ? undefined : breadcrumb[breadcrumb.length - 1];
   const currentPath = breadcrumb.map((b) => b.name).join(" / ");
 
+  // The Clone action is enabled only when the user is inside a folder named
+  // exactly "Proposal" (case-insensitive). This is the convention the CRM
+  // department picked - extending to other departments later only requires
+  // each department to create a folder called "Proposal".
+  const isInProposalFolder =
+    !myFoldersMode && (currentFolder?.name?.trim().toLowerCase() === "proposal");
+  // `proposalLabel` derived from the branding query is declared further down
+  // (right after useBranding() runs) so the variable is referenced after the
+  // hook that defines `branding`. See the Trash/Clone modal-state block.
+
   // Caller's REAL effective level on the folder they're currently looking at.
   // Source of truth is the backend (drive-list returns `myLevelHere`). Falls
   // back to no_access on initial load or on the My-Folders virtual view where
@@ -137,17 +150,27 @@ export function FileManager(_props: FileManagerProps) {
     return (list.data?.myLevelHere as PermLevel) ?? "no_access";
   }, [me?.role, myFoldersMode, list.data?.myLevelHere]);
   const cap = capabilities(myLevelHere);
-  const canCreate = cap.canCreateSubfolder;
-  const canUpload = cap.canUpload;
+  // Super Admins own the system; they pass every gate without needing any
+  // grant. Short-circuit at the COMPONENT level so the buttons light up
+  // regardless of folder-level capability state OR the tab access query
+  // (which may still be loading on first paint).
+  const isSuperAdmin = me?.role === "super_admin";
+  // Non-super-admins need BOTH gates true:
+  //   1) Folder capability (do they have enough on the current folder?)
+  //   2) Tab capability (do they have action access on File Manager at all?)
+  // Server-side BFF re-checks the same.
+  const canActFileManager = useCanAct("file_manager");
+  const canCreate = isSuperAdmin || (cap.canCreateSubfolder && canActFileManager);
+  const canUpload = isSuperAdmin || (cap.canUpload && canActFileManager);
 
   // ─── Modal state ──────────────────────────────────────────────────────────
   // Super Admin and Admin do not belong to any department, but every folder
   // still has an owner department. For those roles we show a department picker
   // in the New Folder modal; for every other role we auto-use their own.
   const isDeptlessRole = me?.role === "super_admin" || me?.role === "admin";
-  // Delete + Restore are Super-Admin-only operations - they live outside the
-  // permission system entirely. The UI hides those affordances accordingly.
-  const isSuperAdmin = me?.role === "super_admin";
+  // `isSuperAdmin` is declared above next to the canCreate/canUpload gates;
+  // we reuse it here for the Delete + Restore + Trash modal affordances,
+  // which are Super-Admin-only and live outside the permission system.
   const departmentsQuery = useDepartments();
   const [pickedOwnerDept, setPickedOwnerDept] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -156,6 +179,17 @@ export function FileManager(_props: FileManagerProps) {
   const trash = useTrash(trashOpen && isSuperAdmin);
   const restoreItem = useRestoreItem();
   const purgeItem = usePurgeItem();
+  // Clone Proposal modal — appears on the file menu only when the current
+  // folder is named "Proposal". Lets the user spin off a new project folder
+  // (Client - Project - <proposal_label>) and copy the sample into it.
+  const branding = useBranding();
+  const cloneProposal = useCloneProposal();
+  const [cloneTarget, setCloneTarget] = useState<FileDTO | null>(null);
+  const [cloneClient, setCloneClient] = useState("");
+  const [cloneProject, setCloneProject] = useState("");
+  // Live preview of the cloned folder name. Derived once the branding query
+  // resolves; falls back to "JDF Proposal" until then.
+  const proposalLabel = branding.data?.proposalLabel?.trim() || "JDF Proposal";
   // Client-side pagination over the combined folders + files listing in the
   // current folder. Snaps back to page 1 every time navigation lands on a
   // different folder (handled by the useEffect on currentFolderId below).
@@ -304,6 +338,37 @@ export function FileManager(_props: FileManagerProps) {
     }
   }
 
+  function closeCloneModal() {
+    if (cloneProposal.isPending) return;
+    setCloneTarget(null);
+    setCloneClient("");
+    setCloneProject("");
+  }
+
+  async function handleCloneConfirmed() {
+    if (!cloneTarget) return;
+    const client = cloneClient.trim();
+    const project = cloneProject.trim();
+    if (!client) { toast.error("Client name is required"); return; }
+    if (!project) { toast.error("Project title is required"); return; }
+    try {
+      const r = await cloneProposal.mutateAsync({
+        sourceFileId: cloneTarget.id,
+        clientName: client,
+        projectTitle: project,
+      });
+      toast.success(`Created "${r.folder.name}"`);
+      setCloneTarget(null);
+      setCloneClient("");
+      setCloneProject("");
+      // Drop the user straight into the new project folder so they can open
+      // the cloned file immediately.
+      navigateTo(r.folder.id);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to clone the proposal");
+    }
+  }
+
   async function handleSync() {
     try {
       const r = await sync.mutateAsync();
@@ -367,8 +432,21 @@ export function FileManager(_props: FileManagerProps) {
             </button>
           )}
           {canCreate && (
-            <button onClick={() => setCreateOpen(true)} disabled={!currentFolder || createFolder.isPending}
-              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 14px", background: "white", color: "#374151", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: currentFolder ? "pointer" : "not-allowed", fontFamily: "'Poppins', sans-serif", opacity: currentFolder ? 1 : 0.5 }}>
+            <button
+              onClick={() => {
+                // Super Admins are never gated by "is a folder open"; if there's
+                // no current folder we explain why and let them act instead of
+                // silently disabling the button.
+                if (!currentFolder) {
+                  toast.error(isSuperAdmin
+                    ? "Open a folder first, or connect Google Drive in Settings if you haven't yet."
+                    : "Open a folder first.");
+                  return;
+                }
+                setCreateOpen(true);
+              }}
+              disabled={createFolder.isPending || (!currentFolder && !isSuperAdmin)}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 14px", background: "white", color: "#374151", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: (createFolder.isPending || (!currentFolder && !isSuperAdmin)) ? "not-allowed" : "pointer", fontFamily: "'Poppins', sans-serif", opacity: (!currentFolder && !isSuperAdmin) ? 0.5 : 1 }}>
               <FolderPlus size={14} /> New folder
             </button>
           )}
@@ -376,8 +454,18 @@ export function FileManager(_props: FileManagerProps) {
             <>
               <input ref={uploadRef} type="file" multiple style={{ display: "none" }}
                 onChange={(e) => handleUploadFiles(e.target.files)} />
-              <button onClick={() => uploadRef.current?.click()} disabled={!currentFolder || uploadFile.isPending}
-                style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: currentFolder ? "pointer" : "not-allowed", fontFamily: "'Poppins', sans-serif", opacity: currentFolder ? 1 : 0.6 }}>
+              <button
+                onClick={() => {
+                  if (!currentFolder) {
+                    toast.error(isSuperAdmin
+                      ? "Open a folder first, or connect Google Drive in Settings if you haven't yet."
+                      : "Open a folder first.");
+                    return;
+                  }
+                  uploadRef.current?.click();
+                }}
+                disabled={uploadFile.isPending || (!currentFolder && !isSuperAdmin)}
+                style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: (uploadFile.isPending || (!currentFolder && !isSuperAdmin)) ? "not-allowed" : "pointer", fontFamily: "'Poppins', sans-serif", opacity: (!currentFolder && !isSuperAdmin) ? 0.6 : 1 }}>
                 <Upload size={14} /> {uploadFile.isPending ? "Uploading…" : "Upload"}
               </button>
             </>
@@ -486,15 +574,24 @@ export function FileManager(_props: FileManagerProps) {
                   </button>
                   {openMenu === `file-${f.id}` && menuPos && typeof document !== "undefined" && createPortal(
                     <div style={{ position: "fixed", top: menuPos.top, right: menuPos.right, width: "190px", background: "white", borderRadius: "10px", boxShadow: "0 12px 32px rgba(0,0,0,0.18)", border: "1px solid #eef0f4", zIndex: 1000, overflow: "hidden" }}>
-                      <button onClick={() => handleDownload(f)}
-                        style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#374151", fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
-                        <Download size={12} /> Open / Download
-                      </button>
+                      {/* Open — opens the file in Google Drive's web viewer
+                          (read or edit depending on permission). Distinct from
+                          Download which fetches a direct-download link. */}
                       <a href={driveFileUrl(f)} target="_blank" rel="noopener noreferrer"
                         onClick={() => setOpenMenu(null)}
                         style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#374151", fontFamily: "'Poppins', sans-serif", textAlign: "left", textDecoration: "none", boxSizing: "border-box" }}>
-                        <ExternalLink size={12} /> Open in Drive
+                        <ExternalLink size={12} /> Open
                       </a>
+                      <button onClick={() => handleDownload(f)}
+                        style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#374151", fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
+                        <Download size={12} /> Download
+                      </button>
+                      {isInProposalFolder && (
+                        <button onClick={() => { setCloneTarget(f); setOpenMenu(null); }}
+                          style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", textAlign: "left", fontWeight: 600 }}>
+                          <Copy size={12} /> Clone
+                        </button>
+                      )}
                       {isSuperAdmin && (
                         <button onClick={() => { setDeleteTarget({ kind: "file", file: f }); setOpenMenu(null); }}
                           style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#ef4444", fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
@@ -625,6 +722,57 @@ export function FileManager(_props: FileManagerProps) {
             <button onClick={handleDeleteConfirmed} disabled={deleteItem.isPending}
               style={{ flex: 1, padding: "11px", background: "#ef4444", color: "white", border: "none", borderRadius: "10px", cursor: deleteItem.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", opacity: deleteItem.isPending ? 0.7 : 1 }}>
               {deleteItem.isPending ? "Deleting…" : "Move to Trash"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Clone Proposal modal — only reachable when the current folder is
+          named "Proposal" and the user picks a sample file. */}
+      {cloneTarget && (
+        <Modal title={`Clone "${cloneTarget.name}"`} onClose={closeCloneModal}>
+          <p style={{ margin: "0 0 16px", fontSize: "12px", color: "#6b7280", fontFamily: "'Poppins', sans-serif", lineHeight: 1.55 }}>
+            A new project folder will be created here and the selected sample will be copied into it. Folder name follows the convention <strong>Client &middot; Project &middot; {proposalLabel}</strong>.
+          </p>
+          <Field label="Client Name" hint="The end client / customer this proposal is for.">
+            <input value={cloneClient} onChange={(e) => setCloneClient(e.target.value)}
+              autoFocus
+              placeholder="e.g. Jeff Bear"
+              maxLength={100}
+              disabled={cloneProposal.isPending}
+              style={inputStyle} />
+          </Field>
+          <Field label="Project Title" hint="A short title for the project. Same client may have many projects, so make it distinctive.">
+            <input value={cloneProject} onChange={(e) => setCloneProject(e.target.value)}
+              placeholder="e.g. LogoQRCodeGenerator"
+              maxLength={120}
+              disabled={cloneProposal.isPending}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleCloneConfirmed(); }}
+              style={inputStyle} />
+          </Field>
+          <div style={{ padding: "12px 14px", background: "#fafbfc", border: "1px dashed #e5e7eb", borderRadius: "10px", fontSize: "12px", color: "#6b7280", fontFamily: "'Poppins', sans-serif", marginBottom: "16px" }}>
+            <div style={{ fontSize: "10px", fontWeight: 600, color: "#9ca3af", letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "4px" }}>Folder will be named</div>
+            <div style={{ color: "var(--brand-primary)", fontWeight: 600 }}>
+              {(cloneClient.trim() || "Client")} &nbsp;-&nbsp; {(cloneProject.trim() || "Project")} &nbsp;-&nbsp; {proposalLabel}
+            </div>
+            <div style={{ fontSize: "10px", fontWeight: 600, color: "#9ca3af", letterSpacing: "0.5px", textTransform: "uppercase", margin: "10px 0 4px" }}>File will be named</div>
+            <div style={{ color: "var(--brand-primary)", fontWeight: 600 }}>
+              {(cloneClient.trim() || "Client")} &nbsp;-&nbsp; {(cloneProject.trim() || "Project")} &nbsp;-&nbsp; {proposalLabel} Proposal - Master Doc
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={closeCloneModal} disabled={cloneProposal.isPending}
+              style={{ flex: 1, padding: "11px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: cloneProposal.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151", fontFamily: "'Poppins', sans-serif" }}>
+              Cancel
+            </button>
+            <button onClick={handleCloneConfirmed}
+              disabled={cloneProposal.isPending || !cloneClient.trim() || !cloneProject.trim()}
+              style={{ flex: 2, padding: "11px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", cursor: (cloneProposal.isPending || !cloneClient.trim() || !cloneProject.trim()) ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", opacity: (cloneProposal.isPending || !cloneClient.trim() || !cloneProject.trim()) ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              {cloneProposal.isPending ? (
+                <><Loader size="sm" /> Cloning…</>
+              ) : (
+                <><Copy size={14} /> Create &amp; Clone</>
+              )}
             </button>
           </div>
         </Modal>

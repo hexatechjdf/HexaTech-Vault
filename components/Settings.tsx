@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { COMPANY_ROOT_NAME } from "@/lib/config";
 import { useBranding, useUpdateBranding, useUploadLogo } from "@/lib/queries/branding";
+import { useCanAct } from "@/lib/queries/tab-permissions";
 import { useDriveStatus, useStartDriveConnect, useVerifyDrive } from "@/lib/queries/drive";
 import {
   useBackupConfig,
@@ -513,6 +514,12 @@ export function Settings() {
   const [primaryColor, setPrimaryColor] = useState("var(--brand-primary)");
   const [accentColor, setAccentColor] = useState("var(--brand-accent)");
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
+  // Company / organization code appended to cloned proposal folders and the
+  // master-doc file inside them. Default "JDF" matches the convention
+  // requested by CRM; rename here whenever the organization rebrands.
+  // Folder: "Jeff Bear - LogoQR - JDF"
+  // File:   "Jeff Bear - LogoQR - JDF Proposal - Master Doc.docx"
+  const [proposalLabel, setProposalLabel] = useState("JDF");
 
   // React Query: server source of truth for branding. Sync to local state on
   // load so the inputs are controlled but the data still streams in from the
@@ -520,6 +527,10 @@ export function Settings() {
   const brandingQuery = useBranding();
   const updateBranding = useUpdateBranding();
   const uploadLogo = useUploadLogo();
+  // Tab gate: this entire screen is the Settings tab. View-only users see
+  // the form populated but can't hit Save (and the server still rejects
+  // mutations they aren't authorised for).
+  const canActSettings = useCanAct("settings");
 
   useEffect(() => {
     const b = brandingQuery.data;
@@ -528,6 +539,7 @@ export function Settings() {
     setPrimaryColor(b.primaryColor);
     setAccentColor(b.accentColor);
     setLogoSrc(b.logoUrl);
+    setProposalLabel(b.proposalLabel);
   }, [brandingQuery.data]);
 
   const isSavingCompany =
@@ -548,12 +560,15 @@ export function Settings() {
     // their existing in-memory toast (not yet persisted).
     if (activeSection === "company") {
       const trimmedName = companyName.trim();
+      const trimmedLabel = proposalLabel.trim();
       if (!trimmedName) { toast.error("Company name cannot be empty"); return; }
+      if (!trimmedLabel) { toast.error("Proposal label cannot be empty"); return; }
       try {
         await updateBranding.mutateAsync({
           companyName: trimmedName,
           primaryColor,
           accentColor,
+          proposalLabel: trimmedLabel,
         });
         setSaved(true);
         toast.success("Company info saved");
@@ -608,6 +623,25 @@ export function Settings() {
                 </div>
               </Field>
             </div>
+            <Field label="Organization Code">
+              <input
+                value={proposalLabel}
+                onChange={(e) => setProposalLabel(e.target.value)}
+                style={inp}
+                onFocus={(e) => (e.target.style.borderColor = "var(--brand-accent)")}
+                onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")}
+                placeholder="e.g. JDF"
+                maxLength={80}
+              />
+              <p style={{ margin: "6px 0 0", fontSize: "11px", color: "#9ca3af", fontFamily: "'Poppins', sans-serif", lineHeight: 1.55 }}>
+                Short code used when cloning a proposal sample. The Clone flow
+                builds both the project folder and the master-doc file from this code:
+                <br />
+                Folder: <strong>Client &middot; Project &middot; {proposalLabel.trim() || "JDF"}</strong>
+                <br />
+                File: <strong>Client &middot; Project &middot; {proposalLabel.trim() || "JDF"} Proposal - Master Doc</strong>
+              </p>
+            </Field>
             <Field label="Company Logo">
               <input ref={logoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleLogoUpload} />
               <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -696,8 +730,9 @@ export function Settings() {
               <h3 style={{ margin: "0 0 2px", color: "var(--brand-primary)", fontSize: "15px", fontWeight: 600, fontFamily: "'Poppins', sans-serif" }}>{sections.find(s => s.id === activeSection)?.label}</h3>
               <p style={{ margin: 0, color: "#9ca3af", fontSize: "11px", fontFamily: "'Poppins', sans-serif" }}>Changes take effect immediately after saving</p>
             </div>
-            <button onClick={handleSave} disabled={isSavingCompany}
-              style={{ display: "flex", alignItems: "center", gap: "7px", padding: "9px 18px", background: saved ? "#22c55e" : "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: isSavingCompany ? "not-allowed" : "pointer", fontFamily: "'Poppins', sans-serif", transition: "background 0.2s", boxShadow: "0 4px 12px rgba(27,42,74,0.3)", opacity: isSavingCompany ? 0.7 : 1 }}>
+            <button onClick={handleSave} disabled={isSavingCompany || !canActSettings}
+              title={!canActSettings ? "View-only access on Settings" : undefined}
+              style={{ display: "flex", alignItems: "center", gap: "7px", padding: "9px 18px", background: saved ? "#22c55e" : "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: (isSavingCompany || !canActSettings) ? "not-allowed" : "pointer", fontFamily: "'Poppins', sans-serif", transition: "background 0.2s", boxShadow: "0 4px 12px rgba(27,42,74,0.3)", opacity: (isSavingCompany || !canActSettings) ? 0.7 : 1 }}>
               {saved ? <Check size={14} /> : <Save size={14} />}
               {isSavingCompany ? "Saving…" : saved ? "Saved!" : "Save Changes"}
             </button>

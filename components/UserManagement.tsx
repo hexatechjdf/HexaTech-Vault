@@ -15,17 +15,25 @@
 // routes + hooks land.
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import {
   Search, Plus, Filter, MoreVertical, Edit, Trash2,
-  FolderOpen, KeyRound, UserCheck, UserX, Eye,
-  ShieldCheck, CheckCircle, XCircle, X, RefreshCw,
+  FolderOpen, KeyRound, UserCheck, UserX, Eye, ScanEye,
+  ShieldCheck, CheckCircle, XCircle, X, RefreshCw, AlertTriangle,
 } from "lucide-react";
+import { UserEffectiveAccess } from "@/components/UserEffectiveAccess";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { useCreateUser, useDepartments, useUsers } from "@/lib/queries/users";
+import {
+  useCreateUser, useDeleteUser, useDepartments,
+  useResetUserPassword, useUpdateUserProfile, useUpdateUserRole, useUpdateUserStatus,
+  useUsers,
+} from "@/lib/queries/users";
+import { useCanAct } from "@/lib/queries/tab-permissions";
 import { Pagination, paginate } from "@/components/Pagination";
 import { Loader, SkeletonRows } from "@/components/Loader";
-import type { Role } from "@/lib/types";
+import type { AppUser, Role } from "@/lib/types";
 
 const ROLES: Role[] = ["super_admin", "admin", "manager", "team_lead", "lead_dev", "team_member"];
 
@@ -57,11 +65,11 @@ function initialsFromName(name: string): string {
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? parts[0]?.[1] ?? "")).toUpperCase();
 }
 
-interface ModalProps { children: React.ReactNode; onClose: () => void; title: string; subtitle?: string }
-function Modal({ children, onClose, title, subtitle }: ModalProps) {
+interface ModalProps { children: React.ReactNode; onClose: () => void; title: string; subtitle?: string; wide?: boolean }
+function Modal({ children, onClose, title, subtitle, wide }: ModalProps) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <div style={{ background: "white", borderRadius: "20px", padding: "32px", width: "480px", maxWidth: "95vw", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", position: "relative" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ background: "white", borderRadius: "20px", padding: "32px", width: wide ? "720px" : "480px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", position: "relative" }} onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} style={{ position: "absolute", top: "16px", right: "16px", background: "#f4f5f7", border: "none", borderRadius: "8px", width: "30px", height: "30px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <X size={15} color="#6b7280" />
         </button>
@@ -103,12 +111,18 @@ const EMPTY_FORM: Omit<NewUserForm, "departmentId"> = {
 
 export function UserManagement() {
   const { user: me } = useAuth();
+  const router = useRouter();
 
   // React Query handles fetching, loading, errors and caching.
   // No manual useState/useEffect for users/departments.
   const usersQuery = useUsers();
   const departmentsQuery = useDepartments();
   const createUser = useCreateUser();
+  const updateProfile = useUpdateUserProfile();
+  const updateRole = useUpdateUserRole();
+  const updateStatus = useUpdateUserStatus();
+  const resetPassword = useResetUserPassword();
+  const deleteUser = useDeleteUser();
 
   const users = useMemo(() => usersQuery.data ?? [], [usersQuery.data]);
   const departments = useMemo(() => departmentsQuery.data ?? [], [departmentsQuery.data]);
@@ -127,6 +141,18 @@ export function UserManagement() {
   const [filterRole, setFilterRole] = useState<"All" | Role>("All");
   const [filterStatus, setFilterStatus] = useState<"All" | "active" | "inactive">("All");
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // Anchor coords for the currently-open row action menu, captured from the
+  // trigger button's bounding rect. We render the dropdown via createPortal
+  // so it escapes the table wrapper's overflow:hidden — otherwise the menu
+  // gets clipped for users near the bottom of the page.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => { if (!openMenu) setMenuPos(null); }, [openMenu]);
+  function openMenuFor(userId: string, anchor: HTMLElement) {
+    if (openMenu === userId) { setOpenMenu(null); return; }
+    const rect = anchor.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setOpenMenu(userId);
+  }
   // Client-side pagination over the filtered list.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -134,7 +160,32 @@ export function UserManagement() {
   const [addModal, setAddModal] = useState(false);
   const [form, setForm] = useState<NewUserForm>({ ...EMPTY_FORM, departmentId: "" });
 
+  // Row-action state. Each is `null` when the corresponding dialog is closed,
+  // or holds the user being acted on. Keeping them separate (instead of a
+  // single discriminated union) keeps each form's submit handler simple.
+  const [editUser, setEditUser] = useState<AppUser | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; avatar: string; googleEmail: string }>({ name: "", avatar: "", googleEmail: "" });
+  const [roleUser, setRoleUser] = useState<AppUser | null>(null);
+  const [roleForm, setRoleForm] = useState<{ role: Role; departmentId: string }>({ role: "admin", departmentId: "" });
+  const [pwUser, setPwUser] = useState<AppUser | null>(null);
+  const [pwValue, setPwValue] = useState("");
+  const [statusUser, setStatusUser] = useState<AppUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
+  // View Access modal — store the user ID only and resolve the live
+  // UserWithPermissions from the users query on every render. That way, if a
+  // grant changes in another tab while the modal is open (or between opens),
+  // the modal reflects the latest cached state instead of a stale snapshot.
+  const [accessUserId, setAccessUserId] = useState<string | null>(null);
+  const accessUser = useMemo(
+    () => (accessUserId ? users.find((u) => u.id === accessUserId) ?? null : null),
+    [accessUserId, users],
+  );
+
   const isSuperAdmin = me?.role === "super_admin";
+  // Tab-permission gate. Lets non-super-admins with explicit user_management
+  // action grant also manage users (Add / Edit / Delete). Super admins always
+  // pass via the engine short-circuit.
+  const canActUserMgmt = useCanAct("user_management");
 
   // Default the form's department to the first one once departments load -
   // but only for roles that actually need one. Super Admin / Admin have no
@@ -205,11 +256,129 @@ export function UserManagement() {
     );
   }
 
-  function comingSoon(label: string) {
-    return () => {
-      toast.info(`${label} — coming soon.`);
-      setOpenMenu(null);
-    };
+  // ── Row actions ──────────────────────────────────────────────────────────
+  // Each handler closes the row menu, then either opens a modal/confirm or
+  // navigates to the appropriate screen. The actual mutations live inside the
+  // modal/confirm submit handlers further down.
+
+  function openEdit(user: AppUser) {
+    setEditUser(user);
+    setEditForm({
+      name: user.name,
+      avatar: user.avatar ?? initialsFromName(user.name),
+      googleEmail: user.googleEmail ?? "",
+    });
+    setOpenMenu(null);
+  }
+
+  function openRole(user: AppUser) {
+    setRoleUser(user);
+    setRoleForm({
+      role: user.role,
+      departmentId: user.departmentId || (departments[0]?.id ?? ""),
+    });
+    setOpenMenu(null);
+  }
+
+  function openPassword(user: AppUser) {
+    setPwUser(user);
+    setPwValue("");
+    setOpenMenu(null);
+  }
+
+  function openStatus(user: AppUser) {
+    setStatusUser(user);
+    setOpenMenu(null);
+  }
+
+  function openDelete(user: AppUser) {
+    setDeleteTarget(user);
+    setOpenMenu(null);
+  }
+
+  function goAssignFolders(user: AppUser) {
+    // Routed to Folder Access Control; the query string lets that screen
+    // pre-select this user on the "Users" tab.
+    router.push(`/folders?principal=user&id=${encodeURIComponent(user.id)}`);
+    setOpenMenu(null);
+  }
+
+  function goViewActivity(user: AppUser) {
+    // Audit Logs filters by actorName via its existing search box, so we
+    // hand it the user's name as a pre-filled search term.
+    router.push(`/audit?actor=${encodeURIComponent(user.name)}`);
+    setOpenMenu(null);
+  }
+
+  function submitEdit() {
+    if (!editUser) return;
+    const name = editForm.name.trim();
+    const avatar = editForm.avatar.trim();
+    const googleEmail = editForm.googleEmail.trim().toLowerCase();
+    if (!name) return toast.error("Name is required.");
+    if (googleEmail && !googleEmail.includes("@")) return toast.error("Invalid Google email.");
+    updateProfile.mutate(
+      { id: editUser.id, name, avatar: avatar || initialsFromName(name), googleEmail: googleEmail || null },
+      {
+        onSuccess: () => { toast.success(`${name} updated.`); setEditUser(null); },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  }
+
+  function submitRole() {
+    if (!roleUser) return;
+    const role = roleForm.role;
+    const requiresDept = role !== "super_admin" && role !== "admin";
+    const departmentId = requiresDept ? roleForm.departmentId : "";
+    if (requiresDept && !departmentId) return toast.error("Pick a department.");
+    updateRole.mutate(
+      { id: roleUser.id, role, departmentId },
+      {
+        onSuccess: () => { toast.success(`Role updated to ${ROLE_LABEL[role]}.`); setRoleUser(null); },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  }
+
+  function submitPassword() {
+    if (!pwUser) return;
+    if (pwValue.length < 8) return toast.error("Password must be at least 8 characters.");
+    resetPassword.mutate(
+      { id: pwUser.id, password: pwValue },
+      {
+        onSuccess: () => {
+          toast.success("Password reset. Share it with the user securely.");
+          setPwUser(null);
+          setPwValue("");
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  }
+
+  function submitStatus() {
+    if (!statusUser) return;
+    const next = statusUser.status === "active" ? "inactive" : "active";
+    updateStatus.mutate(
+      { id: statusUser.id, status: next },
+      {
+        onSuccess: () => {
+          toast.success(`${statusUser.name} ${next === "active" ? "activated" : "deactivated"}.`);
+          setStatusUser(null);
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  }
+
+  function submitDelete() {
+    if (!deleteTarget) return;
+    const t = deleteTarget;
+    deleteUser.mutate(t.id, {
+      onSuccess: () => { toast.success(`${t.name} deleted.`); setDeleteTarget(null); },
+      onError: (e) => toast.error((e as Error).message),
+    });
   }
 
   return (
@@ -240,7 +409,7 @@ export function UserManagement() {
             style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 14px", background: "white", color: "#374151", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: loading || usersQuery.isFetching ? "not-allowed" : "pointer", fontFamily: "'Poppins', sans-serif", opacity: loading || usersQuery.isFetching ? 0.6 : 1 }}>
             <RefreshCw size={14} /> Refresh
           </button>
-          {isSuperAdmin && (
+          {canActUserMgmt && (
             <button onClick={() => setAddModal(true)}
               style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 18px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: 600, cursor: "pointer", fontFamily: "'Poppins', sans-serif", boxShadow: "0 4px 12px rgba(27,42,74,0.3)" }}>
               <Plus size={15} /> Add New User
@@ -330,26 +499,27 @@ export function UserManagement() {
                     <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                       {status === "active" ? <CheckCircle size={14} color="#22c55e" /> : <XCircle size={14} color="#ef4444" />}
                       <span style={{ fontSize: "12px", fontWeight: 500, color: status === "active" ? "#16a34a" : "#dc2626", fontFamily: "'Poppins', sans-serif" }}>
-                        {status === "active" ? "Active" : "Inactive"}
+                        {status === "active" ? "Active" : "InActive"}
                       </span>
                     </div>
                   </td>
                   <td style={{ padding: "14px 16px" }}>
-                    <div style={{ position: "relative" }}>
-                      <button onClick={() => setOpenMenu(openMenu === user.id ? null : user.id)}
+                    <div>
+                      <button onClick={(e) => openMenuFor(user.id, e.currentTarget)}
                         style={{ width: "30px", height: "30px", borderRadius: "8px", border: "1px solid #eef0f4", background: "#f8f9fc", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <MoreVertical size={14} color="#6b7280" />
                       </button>
-                      {openMenu === user.id && (
-                        <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", width: "200px", background: "white", borderRadius: "12px", boxShadow: "0 16px 48px rgba(0,0,0,0.12)", border: "1px solid #eef0f4", zIndex: 50, overflow: "hidden" }}>
+                      {openMenu === user.id && menuPos && typeof document !== "undefined" && createPortal(
+                        <div style={{ position: "fixed", top: menuPos.top, right: menuPos.right, width: "200px", background: "white", borderRadius: "12px", boxShadow: "0 16px 48px rgba(0,0,0,0.18)", border: "1px solid #eef0f4", zIndex: 1000, overflow: "hidden" }}>
                           {[
-                            { icon: Edit, label: "Edit User", action: comingSoon("Edit user"), color: "#374151" },
-                            { icon: FolderOpen, label: "Assign Folders", action: comingSoon("Assign folders"), color: "#374151" },
-                            { icon: ShieldCheck, label: "Change Role", action: comingSoon("Change role"), color: "#374151" },
-                            { icon: status === "active" ? UserX : UserCheck, label: status === "active" ? "Deactivate" : "Activate", action: comingSoon(status === "active" ? "Deactivate" : "Activate"), color: status === "active" ? "#ef4444" : "#22c55e" },
-                            { icon: Eye, label: "View Activity", action: comingSoon("View activity"), color: "#374151" },
-                            { icon: KeyRound, label: "Reset Password", action: comingSoon("Reset password"), color: "#374151" },
-                            { icon: Trash2, label: "Delete User", action: comingSoon("Delete user"), color: "#ef4444" },
+                            { icon: ScanEye, label: "View Access", action: () => { setAccessUserId(user.id); setOpenMenu(null); }, color: "var(--brand-primary)" },
+                            { icon: Edit, label: "Edit User", action: () => openEdit(user), color: "#374151" },
+                            { icon: FolderOpen, label: "Assign Folders", action: () => goAssignFolders(user), color: "#374151" },
+                            { icon: ShieldCheck, label: "Change Role", action: () => openRole(user), color: "#374151" },
+                            { icon: status === "active" ? UserX : UserCheck, label: status === "active" ? "Deactivate" : "Activate", action: () => openStatus(user), color: status === "active" ? "#ef4444" : "#22c55e" },
+                            { icon: Eye, label: "View Activity", action: () => goViewActivity(user), color: "#374151" },
+                            { icon: KeyRound, label: "Reset Password", action: () => openPassword(user), color: "#374151" },
+                            { icon: Trash2, label: "Delete User", action: () => openDelete(user), color: "#ef4444" },
                           ].map((action, ai) => (
                             <button key={ai} onClick={action.action}
                               style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: action.color, fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
@@ -357,7 +527,8 @@ export function UserManagement() {
                               {action.label}
                             </button>
                           ))}
-                        </div>
+                        </div>,
+                        document.body
                       )}
                     </div>
                   </td>
@@ -429,7 +600,161 @@ export function UserManagement() {
         </Modal>
       )}
 
-      {openMenu && <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setOpenMenu(null)} />}
+      {/* Edit User — name, avatar (initials), and the Google email used for Drive sharing.
+          Email/role/department are intentionally NOT editable here: email changes
+          require touching auth.users separately, and role/dept live in their own
+          dialog so the audit log entry tells the right story. */}
+      {editUser && (
+        <Modal title="Edit User" subtitle={`Update ${editUser.name}'s profile.`} onClose={() => updateProfile.isPending ? null : setEditUser(null)}>
+          <FormField label="Full Name">
+            <input value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} disabled={updateProfile.isPending} />
+          </FormField>
+          <FormField label="Initials" hint="Two characters shown in the avatar chip.">
+            <input value={editForm.avatar} onChange={(e) => setEditForm((p) => ({ ...p, avatar: e.target.value.toUpperCase().slice(0, 2) }))} style={inputStyle} disabled={updateProfile.isPending} />
+          </FormField>
+          <FormField label="Google email" hint="Used for Google Drive sharing. Leave blank to use the login email.">
+            <input value={editForm.googleEmail} onChange={(e) => setEditForm((p) => ({ ...p, googleEmail: e.target.value }))} type="email" placeholder={editUser.email} style={inputStyle} disabled={updateProfile.isPending} />
+          </FormField>
+          <div style={{ padding: "10px 12px", background: "#f8f9fc", border: "1px solid #eef0f4", borderRadius: "10px", fontSize: "11px", color: "#6b7280", marginBottom: "14px" }}>
+            Login email: <strong>{editUser.email}</strong> (read-only)
+          </div>
+          <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+            <button onClick={() => setEditUser(null)} disabled={updateProfile.isPending}
+              style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: updateProfile.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151" }}>Cancel</button>
+            <button onClick={submitEdit} disabled={updateProfile.isPending}
+              style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", cursor: updateProfile.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, opacity: updateProfile.isPending ? 0.7 : 1 }}>
+              {updateProfile.isPending ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Change Role — role + department selection, mirrors the Add User form
+          rules: super_admin/admin have no department, every other role does. */}
+      {roleUser && (() => {
+        const requiresDept = roleForm.role !== "super_admin" && roleForm.role !== "admin";
+        const pending = updateRole.isPending;
+        return (
+          <Modal title="Change Role" subtitle={`Update ${roleUser.name}'s role and department.`} onClose={() => pending ? null : setRoleUser(null)}>
+            <FormField label="Role">
+              <select value={roleForm.role} onChange={(e) => setRoleForm((p) => ({ ...p, role: e.target.value as Role }))} style={selectStyle} disabled={pending}>
+                {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Department">
+              {!requiresDept ? (
+                <div style={{ padding: "10px 12px", background: "#f8f9fc", border: "1.5px solid #eef0f4", borderRadius: "10px", fontSize: "12.5px", color: "#9ca3af" }}>
+                  Not applicable — {roleForm.role === "super_admin" ? "Super Admin" : "Admin"} has no department
+                </div>
+              ) : (
+                <select value={roleForm.departmentId} onChange={(e) => setRoleForm((p) => ({ ...p, departmentId: e.target.value }))} style={selectStyle} disabled={pending || departments.length === 0}>
+                  {departments.length === 0 && <option value="">No departments — add one first</option>}
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              )}
+            </FormField>
+            <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+              <button onClick={() => setRoleUser(null)} disabled={pending}
+                style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: pending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151" }}>Cancel</button>
+              <button onClick={submitRole} disabled={pending}
+                style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", cursor: pending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, opacity: pending ? 0.7 : 1 }}>
+                {pending ? "Updating…" : "Update Role"}
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* Reset Password — super admin sets a new password; share it out-of-band. */}
+      {pwUser && (
+        <Modal title="Reset Password" subtitle={`Set a new password for ${pwUser.name}.`} onClose={() => resetPassword.isPending ? null : setPwUser(null)}>
+          <FormField label="New Password" hint="Minimum 8 characters. Share it with the user securely.">
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input type="text" value={pwValue} onChange={(e) => setPwValue(e.target.value)} placeholder="Min 8 characters" style={{ ...inputStyle, flex: 1, fontFamily: "monospace" }} disabled={resetPassword.isPending} />
+              <button type="button" onClick={() => setPwValue(randomPassword())} disabled={resetPassword.isPending}
+                style={{ padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600, color: "#374151" }}>
+                Generate
+              </button>
+            </div>
+          </FormField>
+          <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+            <button onClick={() => setPwUser(null)} disabled={resetPassword.isPending}
+              style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: resetPassword.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151" }}>Cancel</button>
+            <button onClick={submitPassword} disabled={resetPassword.isPending}
+              style={{ flex: 2, padding: "12px", background: "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", cursor: resetPassword.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, opacity: resetPassword.isPending ? 0.7 : 1 }}>
+              {resetPassword.isPending ? "Resetting…" : "Reset Password"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Activate / Deactivate confirm. */}
+      {statusUser && (() => {
+        const willDeactivate = statusUser.status === "active";
+        const verb = willDeactivate ? "Deactivate" : "Activate";
+        const accent = willDeactivate ? "#ef4444" : "#22c55e";
+        return (
+          <Modal title={`${verb} User`} subtitle={`This will ${verb.toLowerCase()} ${statusUser.name}'s account.`} onClose={() => updateStatus.isPending ? null : setStatusUser(null)}>
+            <div style={{ padding: "12px 14px", background: willDeactivate ? "#fef2f2" : "#f0fdf4", border: `1px solid ${willDeactivate ? "#fecaca" : "#bbf7d0"}`, borderRadius: "10px", display: "flex", gap: "10px", alignItems: "flex-start", marginBottom: "14px" }}>
+              <AlertTriangle size={16} color={accent} style={{ flexShrink: 0, marginTop: "2px" }} />
+              <span style={{ fontSize: "12.5px", color: willDeactivate ? "#991b1b" : "#15803d", lineHeight: 1.5 }}>
+                {willDeactivate
+                  ? "An inactive user cannot sign in. Their grants remain in place and will take effect again on reactivation."
+                  : "The user will be able to sign in again immediately."}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={() => setStatusUser(null)} disabled={updateStatus.isPending}
+                style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: updateStatus.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151" }}>Cancel</button>
+              <button onClick={submitStatus} disabled={updateStatus.isPending}
+                style={{ flex: 2, padding: "12px", background: accent, color: "white", border: "none", borderRadius: "10px", cursor: updateStatus.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, opacity: updateStatus.isPending ? 0.7 : 1 }}>
+                {updateStatus.isPending ? "Saving…" : verb}
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+
+      {/* View Access modal — shows the user's effective folder + tab grants
+          split by source. Read-only. Renders off the cached grants we already
+          have in the users query (no extra fetch). When admins change a role
+          grant in Folder Access Control or Tab Access Control, the mutation
+          invalidates the users query so the next open shows fresh state. */}
+      {accessUser && (
+        <Modal
+          title={`Access for ${accessUser.name}`}
+          subtitle="Inherited (via role + department) and direct grants."
+          onClose={() => setAccessUserId(null)}
+          wide
+        >
+          <UserEffectiveAccess userId={accessUser.id} preloaded={accessUser} />
+        </Modal>
+      )}
+
+      {/* Delete confirm — destructive; requires typing the user's name to enable. */}
+      {deleteTarget && (
+        <Modal title="Delete User" subtitle="This permanently removes the account and audit-logs the action." onClose={() => deleteUser.isPending ? null : setDeleteTarget(null)}>
+          <div style={{ padding: "12px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px", display: "flex", gap: "10px", alignItems: "flex-start", marginBottom: "14px" }}>
+            <AlertTriangle size={16} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+            <span style={{ fontSize: "12.5px", color: "#991b1b", lineHeight: 1.5 }}>
+              <strong>{deleteTarget.name}</strong> ({deleteTarget.email}) will be deleted. This cannot be undone.
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={() => setDeleteTarget(null)} disabled={deleteUser.isPending}
+              style={{ flex: 1, padding: "12px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: deleteUser.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, color: "#374151" }}>Cancel</button>
+            <button onClick={submitDelete} disabled={deleteUser.isPending}
+              style={{ flex: 2, padding: "12px", background: "#ef4444", color: "white", border: "none", borderRadius: "10px", cursor: deleteUser.isPending ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, opacity: deleteUser.isPending ? 0.7 : 1 }}>
+              {deleteUser.isPending ? "Deleting…" : "Delete User"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {openMenu && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 999 }} onClick={() => setOpenMenu(null)} />,
+        document.body
+      )}
     </div>
   );
 }

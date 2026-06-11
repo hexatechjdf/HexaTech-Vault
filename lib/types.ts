@@ -136,6 +136,7 @@ export type Screen =
   | "dashboard"
   | "users"
   | "folders"
+  | "tabs"
   | "audit"
   | "files"
   | "storage"

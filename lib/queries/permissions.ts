@@ -8,6 +8,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GrantDTO, PermLevel, PrincipalType } from "@/lib/types";
+import { userQueryKeys } from "@/lib/queries/users";
 
 export const permissionsQueryKeys = {
   byFolder: (folderId: string | null | undefined) => ["folder-permissions", folderId ?? null] as const,
@@ -71,6 +72,12 @@ export function useSetPermission() {
     mutationFn: postPermission,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: permissionsQueryKeys.byFolder(variables.folderId) });
+      // Keep the FolderAccessControl tree view in sync after any grant change.
+      qc.invalidateQueries({ queryKey: accessTreeQueryKeys.all });
+      // The User Management list embeds per-user permission summaries; a role
+      // grant change here may shift "inherited" rows for every user holding
+      // that role. Bust the cache so the next render reflects reality.
+      qc.invalidateQueries({ queryKey: userQueryKeys.users });
     },
   });
 }
@@ -86,6 +93,66 @@ export function useRevokePermission() {
       postPermission({ ...input, level: "no_access" }),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: permissionsQueryKeys.byFolder(variables.folderId) });
+      // The access-tree view aggregates grants for ALL folders, so any single
+      // grant change invalidates it too.
+      qc.invalidateQueries({ queryKey: accessTreeQueryKeys.all });
+      // User Management embeds per-user grant lists — bust it so the inline
+      // permissions dropdown reflects the revoke.
+      qc.invalidateQueries({ queryKey: userQueryKeys.users });
     },
+  });
+}
+
+// ─── Access tree (FolderAccessControl batch endpoint) ───────────────────────
+//
+// Single-fetch source of truth for the Folder Access Control screen. Replaces
+// the previous N-call pattern (drive-list per folder + permissions-get per
+// folder) with one request to /api/admin/folders/access-tree.
+
+export interface AccessTreeFolder {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  is_root: boolean;
+  path: string | null;
+}
+
+export interface AccessTreeGrant {
+  id: string;
+  folderId: string;
+  principalType: "user" | "role";
+  principalId: string;
+  /** Department scope for role grants (null = all departments). */
+  principalDeptId: string | null;
+  level: PermLevel;
+  expiresAt: string | null;
+}
+
+export interface AccessTree {
+  folders: AccessTreeFolder[];
+  grants: AccessTreeGrant[];
+}
+
+export const accessTreeQueryKeys = {
+  all: ["access-tree"] as const,
+};
+
+async function fetchAccessTree(): Promise<AccessTree> {
+  const res = await fetch("/api/admin/folders/access-tree", { cache: "no-store" });
+  return asJson<AccessTree>(res, "Failed to load folder access tree");
+}
+
+/**
+ * Loads the full folder tree + every active grant in one request.
+ * Super-Admin only on the BFF; the hook returns the 403 error otherwise.
+ *
+ * Cached for 30s — invalidated by useSetPermission / useRevokePermission so
+ * grant edits inside FolderAccessControl reflect immediately.
+ */
+export function useAccessTree() {
+  return useQuery({
+    queryKey: accessTreeQueryKeys.all,
+    queryFn: fetchAccessTree,
+    staleTime: 30_000,
   });
 }

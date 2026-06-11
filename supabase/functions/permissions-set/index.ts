@@ -98,11 +98,33 @@ Deno.serve(async (req) => {
     }
 
     // Manage-access gate.
-    const callerLevel = await requirePermission(user.id, folderId, "manage_access");
+    //
+    // A Super Admin can delegate "you can manage Folder Access Control" to a
+    // non-super-admin by giving them folder_access:action on the Tab Access
+    // Control screen. Those callers don't need per-folder full_control — the
+    // tab-level grant is the hook for "act as folder admin everywhere".
+    //
+    // Resolution order:
+    //   1. Super Admin → always passes (requirePermission short-circuits).
+    //   2. folder_access:action tab grant → treated as full_control on every
+    //      folder; skips both the per-folder check and the escalation guard.
+    //   3. Otherwise → standard per-folder full_control gate.
+    const { data: tabLevelData } = await serviceClient().rpc(
+      "get_effective_tab_level",
+      { p_user: user.id, p_tab: "folder_access" },
+    );
+    const tabLevel = (tabLevelData as string | null) ?? "no_access";
+    const viaTabGrant = user.role !== "super_admin" && tabLevel === "action";
+
+    const callerLevel: PermLevel = viaTabGrant
+      ? ("full_control" as PermLevel)
+      : await requirePermission(user.id, folderId, "manage_access");
 
     // Escalation guard: a non-super_admin manager cannot grant above their own
-    // effective level on this folder.
-    if (user.role !== "super_admin" && rankOf(level as PermLevel) > rankOf(callerLevel)) {
+    // effective level on this folder. Tab-action callers are exempt — they've
+    // been delegated admin scope across every folder, so the level they pick
+    // is the level that takes effect, not "clamped to their own".
+    if (user.role !== "super_admin" && !viaTabGrant && rankOf(level as PermLevel) > rankOf(callerLevel)) {
       return errorResponse(
         `Cannot grant '${level}' - exceeds your own level '${callerLevel}'`,
         403,

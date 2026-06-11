@@ -13,6 +13,8 @@ export interface Branding {
   primaryColor: string;
   accentColor: string;
   logoUrl: string | null;
+  /** Suffix appended to cloned proposal folder names ("Client - Project - X"). */
+  proposalLabel: string;
   updatedAt: string | null;
 }
 
@@ -40,6 +42,7 @@ export interface UpdateBrandingInput {
   primaryColor?: string;
   accentColor?: string;
   logoUrl?: string | null;
+  proposalLabel?: string;
 }
 
 async function patchBranding(input: UpdateBrandingInput): Promise<Branding> {

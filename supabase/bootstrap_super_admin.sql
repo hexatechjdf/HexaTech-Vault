@@ -33,7 +33,10 @@ DECLARE
   v_name          text   := 'Zara Ahmed';                       -- display name
   v_email         text   := 'zara@hexatech.io';                 -- must match auth user
   v_avatar        text   := 'ZA';                               -- 2-letter initials
-  v_department    text   := 'Executive';                        -- existing department.name
+  -- Must be one of the departments created by migration 0004 (CRM Expert,
+  -- Custom Development, HR) or its 0014 rename (WordPress). Pick whichever
+  -- the Super Admin belongs to operationally.
+  v_department    text   := 'HR';
   v_department_id uuid;
 BEGIN
   SELECT id INTO v_department_id FROM departments WHERE name = v_department;

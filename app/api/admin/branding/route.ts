@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
+import { resolveTabLevel } from "@/lib/server/require-tab-level";
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,10 @@ interface BrandingRow {
   primary_color: string;
   accent_color: string;
   logo_url: string | null;
+  // Suffix appended to cloned proposal folder names
+  // (<Client> - <Project> - <proposal_label>). Configured here so renaming
+  // the proposal product line never needs a code change.
+  proposal_label: string;
   updated_at: string | null;
 }
 
@@ -35,6 +40,7 @@ function toDTO(row: BrandingRow) {
     primaryColor: row.primary_color,
     accentColor: row.accent_color,
     logoUrl: row.logo_url,
+    proposalLabel: row.proposal_label,
     updatedAt: row.updated_at,
   };
 }
@@ -66,7 +72,7 @@ export async function GET() {
   }
   const { data, error } = await admin
     .from("branding")
-    .select("company_name, primary_color, accent_color, logo_url, updated_at")
+    .select("company_name, primary_color, accent_color, logo_url, proposal_label, updated_at")
     .eq("id", true)
     .maybeSingle();
   if (error || !data) return bad("Failed to load branding", 500);
@@ -79,13 +85,18 @@ interface PatchBody {
   primaryColor?: string;
   accentColor?: string;
   logoUrl?: string | null;
+  proposalLabel?: string;
 }
 
 export async function PATCH(req: Request) {
   const ctx = await getCaller();
   if ("error" in ctx) return ctx.error;
   const { caller } = ctx;
-  if (caller.role !== "super_admin") return bad("Super admin only", 403);
+  // Allow super admins OR anyone with settings:action via the tab engine.
+  if (caller.role !== "super_admin") {
+    const level = await resolveTabLevel(caller.id, "settings");
+    if (level !== "action") return bad("Insufficient permission on Settings", 403);
+  }
 
   let body: PatchBody;
   try {
@@ -121,6 +132,12 @@ export async function PATCH(req: Request) {
       updates.logo_url = null;
     }
   }
+  if (body.proposalLabel !== undefined) {
+    const label = String(body.proposalLabel).trim();
+    if (!label) return bad("Proposal label cannot be empty", 422);
+    if (label.length > 80) return bad("Proposal label too long (max 80 characters)", 422);
+    updates.proposal_label = label;
+  }
 
   if (Object.keys(updates).length === 0) return bad("No updates provided", 422);
 
@@ -138,7 +155,7 @@ export async function PATCH(req: Request) {
     .from("branding")
     .update(updates)
     .eq("id", true)
-    .select("company_name, primary_color, accent_color, logo_url, updated_at")
+    .select("company_name, primary_color, accent_color, logo_url, proposal_label, updated_at")
     .single();
   if (error || !data) return bad(error?.message ?? "Failed to update branding", 500);
 

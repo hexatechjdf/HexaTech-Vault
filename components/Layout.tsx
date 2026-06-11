@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useBranding } from "@/lib/queries/branding";
+import { useMyTabAccess } from "@/lib/queries/tab-permissions";
+import { TAB_LABELS, TAB_ROUTES, TAB_NAMES, type TabName } from "@/lib/tabs";
 import type { Screen, User, Role } from "@/lib/types";
 
 // Fallback logo when no custom logo has been uploaded yet (or the BFF call fails).
@@ -32,6 +34,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { id: "dashboard", label: "Dashboard",            icon: LayoutDashboard },
     { id: "users",     label: "User Management",       icon: Users },
     { id: "folders",   label: "Folder Access Control", icon: FolderLock },
+    { id: "tabs",      label: "Tab Access Control",    icon: Shield },
     { id: "files",     label: "File Manager",          icon: FolderOpen },
     { id: "audit",     label: "Audit Logs",            icon: ScrollText },
     { id: "storage",   label: "Storage Overview",      icon: HardDrive },
@@ -81,7 +84,8 @@ const ROLE_BADGE_COLORS: Record<Role, string> = {
 
 const screenTitles: Record<Screen, string> = {
   login: "Login", dashboard: "Dashboard", users: "User Management",
-  folders: "Folder Access Control", audit: "Audit Logs", files: "File Manager",
+  folders: "Folder Access Control", tabs: "Tab Access Control",
+  audit: "Audit Logs", files: "File Manager",
   storage: "Storage Overview", settings: "Settings", profile: "My Profile", upload: "Upload Files",
 };
 
@@ -122,7 +126,28 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notifs, setNotifs] = useState<Notif[]>(initialNotifs);
 
-  const navItems = NAV_BY_ROLE[user.role] ?? NAV_BY_ROLE.team_lead;
+  // Nav is driven by the tab permission engine for non-super-admin users:
+  // a Dashboard entry is always shown, plus every tab whose level is at
+  // least 'view'. Super admins get the full nav (including Tab Access
+  // Control) without hitting the engine. Until myTabAccess loads we render
+  // just Dashboard so the sidebar isn't empty.
+  const myTabAccess = useMyTabAccess();
+  const superAdminNav = NAV_BY_ROLE.super_admin;
+  const navItems = (() => {
+    if (user.role === "super_admin") return superAdminNav;
+    const dashboard = superAdminNav.find((n) => n.id === "dashboard")!;
+    const access = myTabAccess.data;
+    if (!access) return [dashboard];
+    const visible: NavItem[] = [dashboard];
+    for (const tab of TAB_NAMES) {
+      if (access[tab] === "no_access") continue;
+      const route = TAB_ROUTES[tab].replace(/^\//, "") as Screen;
+      const fromSuper = superAdminNav.find((n) => n.id === route);
+      if (fromSuper) visible.push(fromSuper);
+      else visible.push({ id: route, label: TAB_LABELS[tab], icon: FolderOpen });
+    }
+    return visible;
+  })();
   const unreadCount = notifs.filter(n => !n.read).length;
   const roleLabel = ROLE_LABELS[user.role];
   const roleBadgeColor = ROLE_BADGE_COLORS[user.role];

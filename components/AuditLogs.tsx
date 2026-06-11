@@ -8,6 +8,7 @@
 // admins to their own department. Kept in the signature for prop compatibility.
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Search, Filter, Download, AlertTriangle, Clock, Globe, X, FileText, Table, Eye, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useAuditLogs, type AuditLogEntry } from "@/lib/queries/audit";
@@ -127,7 +128,12 @@ export function AuditLogs({ readOnly = false, department }: Props) {
   const logsQuery = useAuditLogs();
   const allLogs = useMemo(() => logsQuery.data ?? [], [logsQuery.data]);
 
-  const [search, setSearch] = useState("");
+  // When the user is sent here from User Management's "View Activity" action,
+  // the URL carries ?actor=<name>. We pre-fill the search box so they land on
+  // a filtered view immediately.
+  const searchParams = useSearchParams();
+  const actorParam = searchParams?.get("actor") ?? "";
+  const [search, setSearch] = useState(actorParam);
   const [filterAction, setFilterAction] = useState("All");
   const [filterDate, setFilterDate] = useState("All Time");
   const [showSuspicious, setShowSuspicious] = useState(false);
