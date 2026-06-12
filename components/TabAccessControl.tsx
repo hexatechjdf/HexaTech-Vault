@@ -17,6 +17,7 @@ import type { Role } from "@/lib/types";
 import { TAB_NAMES, TAB_LABELS, TAB_LEVELS, TAB_LEVEL_LABELS, type TabName, type TabLevel } from "@/lib/tabs";
 import { useTabGrants, useSetTabGrant, type TabGrant } from "@/lib/queries/tab-permissions";
 import { useUsers, useDepartments } from "@/lib/queries/users";
+import { Skeleton } from "@/components/Loader";
 
 const SCOPE_ALL = "__all__";
 
@@ -34,6 +35,17 @@ const LEVEL_COLORS: Record<TabLevel, string> = {
   no_access: "#9ca3af",
   view: "#3b82f6",
   action: "#10b981",
+};
+
+// Inheritance badge used only on the Users tab — shows whether the displayed
+// level is a per-user grant (no badge), a role+dept inherited grant, or an
+// unscoped-role inherited grant. Same visual language as Folder Access Control
+// so admins recognise it at a glance.
+const SOURCE_BADGE: Record<"direct" | "role_dept" | "role_unscoped" | "none", { label: string; bg: string; fg: string } | null> = {
+  direct: null,
+  role_dept: { label: "inherited · role+dept", bg: "#dbeafe", fg: "#1e3a8a" },
+  role_unscoped: { label: "inherited · role", bg: "#e0e7ff", fg: "#3730a3" },
+  none: null,
 };
 
 export function TabAccessControl() {
@@ -59,18 +71,70 @@ export function TabAccessControl() {
   // Track in-flight changes per tab so we can spin only the row being edited.
   const [pending, setPending] = useState<Set<TabName>>(new Set());
 
-  // ── Resolve the current level for each tab, scoped to the selected principal ──
-  const levelFor = useMemo(() => {
-    return (tab: TabName): TabLevel => {
-      const match = grants.find((g: TabGrant) =>
-        g.tab === tab &&
-        g.principalType === principalType &&
-        g.principalId === principalId &&
-        (principalType === "user" ? true : (g.principalDeptId ?? null) === principalDeptId),
+  // ── Resolve the effective level for each tab, scoped to the selected principal ──
+  //
+  // Mirrors the Folder Access Control Users-tab fix and the SQL
+  // get_effective_tab_level() semantics:
+  //
+  //   - Role view: explicit role grant for the chosen department scope only.
+  //     Roles don't inherit from anywhere — admins set them per-tab.
+  //
+  //   - User view: user-wins. At each fallback step we return the first match:
+  //       1. Per-user grant on this tab (including 'no_access' as explicit revocation)
+  //       2. Role + caller's department grant
+  //       3. Role-unscoped grant
+  //       4. Otherwise 'no_access'
+  //     Without this walk, every user appeared to have 'no_access' on every
+  //     tab until a per-user grant was added — even when their role already
+  //     gave them View / Action via the Roles tab.
+  type TabLevelSource = "direct" | "role_dept" | "role_unscoped" | "none";
+  type TabLevelResolution = { level: TabLevel; source: TabLevelSource };
+
+  const resolveLevel = useMemo(() => {
+    return (tab: TabName): TabLevelResolution => {
+      if (principalType === "role") {
+        const match = grants.find((g: TabGrant) =>
+          g.tab === tab &&
+          g.principalType === "role" &&
+          g.principalId === principalId &&
+          (g.principalDeptId ?? null) === principalDeptId,
+        );
+        return match ? { level: match.level, source: "direct" } : { level: "no_access", source: "none" };
+      }
+
+      // User view — user-wins, then role + dept, then role-unscoped.
+      const targetUser = users.find((u) => u.id === principalId);
+      if (!targetUser) return { level: "no_access", source: "none" };
+
+      const userGrant = grants.find((g: TabGrant) =>
+        g.tab === tab && g.principalType === "user" && g.principalId === targetUser.id,
       );
-      return match?.level ?? "no_access";
+      if (userGrant) return { level: userGrant.level, source: "direct" };
+
+      if (targetUser.departmentId) {
+        const rdGrant = grants.find((g: TabGrant) =>
+          g.tab === tab &&
+          g.principalType === "role" &&
+          g.principalId === targetUser.role &&
+          (g.principalDeptId ?? null) === targetUser.departmentId,
+        );
+        if (rdGrant) return { level: rdGrant.level, source: "role_dept" };
+      }
+
+      const ruGrant = grants.find((g: TabGrant) =>
+        g.tab === tab &&
+        g.principalType === "role" &&
+        g.principalId === targetUser.role &&
+        (g.principalDeptId ?? null) === null,
+      );
+      if (ruGrant) return { level: ruGrant.level, source: "role_unscoped" };
+
+      return { level: "no_access", source: "none" };
     };
-  }, [grants, principalType, principalId, principalDeptId]);
+  }, [grants, principalType, principalId, principalDeptId, users]);
+
+  const levelFor = (tab: TabName): TabLevel => resolveLevel(tab).level;
+  const sourceFor = (tab: TabName): TabLevelSource => resolveLevel(tab).source;
 
   // ── Principal options for the left list ──
   // `users` is already filtered to exclude super_admins above, so this map
@@ -173,7 +237,53 @@ export function TabAccessControl() {
       )}
 
       {loading ? (
-        <div style={{ color: "#9ca3af", fontSize: "13px" }}>Loading tab grants…</div>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Loading tab grants"
+          style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "18px" }}
+        >
+          {/* Left rail skeleton — mirrors the principal list */}
+          <div style={{ background: "white", borderRadius: "16px", border: "1px solid #eef0f4", overflow: "hidden", height: "fit-content", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid #f4f5f7" }}>
+              <Skeleton width={110} height={11} rounded="md" />
+            </div>
+            <div>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 18px", borderBottom: "1px solid #f9fafb" }}>
+                  <Skeleton width={32} height={32} rounded="md" />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <Skeleton width={`${55 + ((i * 7) % 25)}%`} height={11} rounded="md" />
+                    <Skeleton width={`${30 + ((i * 5) % 20)}%`} height={9} rounded="md" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right pane skeleton — mirrors the tab matrix (6 rows) */}
+          <div style={{ background: "white", borderRadius: "16px", border: "1px solid #eef0f4", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Skeleton width={110} height={9} rounded="md" />
+                <Skeleton width={180} height={14} rounded="md" />
+              </div>
+              <Skeleton width={260} height={26} rounded="md" />
+            </div>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "10px", border: "1px solid #eef0f4", background: "#fafbfc", marginBottom: "8px" }}
+              >
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <Skeleton width={`${35 + ((i * 9) % 25)}%`} height={12} rounded="md" />
+                  <Skeleton width={`${20 + ((i * 6) % 15)}%`} height={9} rounded="md" />
+                </div>
+                <Skeleton width={140} height={28} rounded="md" />
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "18px" }}>
           {/* Principal list */}
@@ -214,6 +324,8 @@ export function TabAccessControl() {
 
             {TAB_NAMES.map((tab) => {
               const level = levelFor(tab);
+              const source = sourceFor(tab);
+              const badge = SOURCE_BADGE[source];
               const isPending = pending.has(tab);
               return (
                 <div key={tab} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "10px", border: `1px solid ${level !== "no_access" ? LEVEL_COLORS[level] + "30" : "#eef0f4"}`, background: level !== "no_access" ? `${LEVEL_COLORS[level]}08` : "#fafbfc", marginBottom: "8px" }}>
@@ -221,16 +333,35 @@ export function TabAccessControl() {
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--brand-primary)" }}>{TAB_LABELS[tab]}</div>
                     <div style={{ fontSize: "11px", color: "#9ca3af" }}>/{tab.replace(/_/g, "-")}</div>
                   </div>
-                  <select
-                    value={level}
-                    onChange={(e) => handleChange(tab, e.target.value as TabLevel)}
-                    disabled={isPending}
-                    style={{ padding: "6px 12px", borderRadius: "8px", border: `1.5px solid ${LEVEL_COLORS[level]}40`, background: `${LEVEL_COLORS[level]}10`, color: LEVEL_COLORS[level], fontSize: "12px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: isPending ? "wait" : "pointer", minWidth: "140px" }}
+                  {badge && (
+                    <span
+                      title="This level is inherited from a role grant. Picking a new value here creates a per-user grant on this tab that overrides the inherited one."
+                      style={{ padding: "2px 7px", borderRadius: "999px", background: badge.bg, color: badge.fg, fontSize: "9.5px", fontWeight: 600, letterSpacing: "0.3px", textTransform: "uppercase", fontFamily: "'Poppins', sans-serif" }}
+                    >
+                      {badge.label}
+                    </span>
+                  )}
+                  <span
+                    className={isPending ? "pending-border-trace" : undefined}
+                    style={isPending ? { ["--trace-color" as string]: "#10b981" } : undefined}
                   >
-                    {TAB_LEVELS.map((lvl) => (
-                      <option key={lvl} value={lvl}>{TAB_LEVEL_LABELS[lvl]}</option>
-                    ))}
-                  </select>
+                    {isPending && (
+                      <svg className="pending-border-trace-svg" aria-hidden="true">
+                        <rect x="0" y="0" width="100%" height="100%" rx="8" ry="8" pathLength="100" />
+                      </svg>
+                    )}
+                    <select
+                      value={level}
+                      onChange={(e) => handleChange(tab, e.target.value as TabLevel)}
+                      disabled={isPending}
+                      aria-busy={isPending}
+                      style={{ padding: "6px 12px", borderRadius: "8px", border: `1.5px solid ${LEVEL_COLORS[level]}40`, background: `${LEVEL_COLORS[level]}10`, color: LEVEL_COLORS[level], fontSize: "12px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: isPending ? "wait" : "pointer", minWidth: "140px", display: "block" }}
+                    >
+                      {TAB_LEVELS.map((lvl) => (
+                        <option key={lvl} value={lvl}>{TAB_LEVEL_LABELS[lvl]}</option>
+                      ))}
+                    </select>
+                  </span>
                 </div>
               );
             })}

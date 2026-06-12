@@ -352,6 +352,9 @@ html, body { height: 100%; margin: 0; }
   vector-effect: non-scaling-stroke;
   stroke-linecap: round;
   stroke-dasharray: 30 70;
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--trace-color) 75%, transparent))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--trace-color) 45%, transparent));
   animation: pending-border-trace-draw 1.4s linear infinite;
 }
 

@@ -1,20 +1,18 @@
 // GET /api/admin/audit-logs
 //
 // Returns the most recent audit log entries, joined with the actor's name,
-// role, and department. Cookie-authed: any active app_user can hit this
-// endpoint, but RLS on the audit_log table scopes the results:
-//   - super_admin  → sees every row
-//   - admin        → sees rows whose actor is in their own department
-//   - everyone else → 0 rows (their role has no SELECT policy on audit_log)
+// role, and department. Gated by the Tab Permission engine: caller must hold
+// `audit_logs ≥ view` (super_admin short-circuits). We then read with the
+// service-role client because the audit_log table's RLS policies only allow
+// SELECT for super_admin + admin — anyone else granted view via the tab
+// engine would see 0 rows through a user-scoped client.
 //
 // Query params:
 //   ?limit=NNN  — caps the page size (default 500, hard ceiling 1000).
-//
-// Why no role check on the BFF side: RLS is the source of truth and is
-// idiomatic Supabase. Re-checking role here would mostly be redundant.
 
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { requireTabLevel } from "@/lib/server/require-tab-level";
 
 export const dynamic = 'force-dynamic';
 
@@ -43,22 +41,15 @@ interface AuditRow {
 }
 
 export async function GET(req: Request) {
-  const supabase = createSupabaseServerClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  if (!authUser) return bad("Not signed in", 401);
-
-  const { data: caller } = await supabase
-    .from("app_users")
-    .select("id, status")
-    .eq("id", authUser.id)
-    .maybeSingle();
-  if (!caller || caller.status !== "active") return bad("Account inactive", 403);
+  const gate = await requireTabLevel(req, "audit_logs", "view");
+  if (gate instanceof NextResponse) return gate;
 
   const url = new URL(req.url);
   const rawLimit = parseInt(url.searchParams.get("limit") ?? "500", 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 500;
 
-  const { data, error } = await supabase
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
     .from("audit_log")
     .select(
       "id, action, resource_type, resource_id, details, result, ip_address, created_at, actor:actor_id(id, name, role, department_id, departments(name))"

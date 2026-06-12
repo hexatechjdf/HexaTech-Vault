@@ -10,9 +10,9 @@
 // error message before the bytes hit Storage.
 
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
+import { requireTabLevel } from "@/lib/server/require-tab-level";
 
 export const dynamic = 'force-dynamic';
 
@@ -35,18 +35,11 @@ function bad(message: string, status = 400) {
 }
 
 export async function POST(req: Request) {
-  // 1) Identify caller.
-  const supabase = createSupabaseServerClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  if (!authUser) return bad("Not signed in", 401);
-
-  const { data: caller } = await supabase
-    .from("app_users")
-    .select("id, role, status")
-    .eq("id", authUser.id)
-    .maybeSingle();
-  if (!caller || caller.status !== "active") return bad("Account inactive", 403);
-  if (caller.role !== "super_admin") return bad("Super admin only", 403);
+  // 1) Tab-permission gate. Super admins short-circuit; everyone else needs
+  //    settings:action.
+  const gate = await requireTabLevel(req, "settings", "action");
+  if (gate instanceof NextResponse) return gate;
+  const callerId = gate.userId;
 
   // 2) Parse the multipart body.
   let form: FormData;
@@ -103,7 +96,7 @@ export async function POST(req: Request) {
     .update({
       logo_url: publicUrl,
       updated_at: new Date().toISOString(),
-      updated_by: caller.id,
+      updated_by: callerId,
     })
     .eq("id", true)
     .select("company_name, primary_color, accent_color, logo_url, updated_at")
@@ -119,7 +112,7 @@ export async function POST(req: Request) {
   }
 
   await admin.from("audit_log").insert({
-    actor_id: caller.id,
+    actor_id: callerId,
     action: "admin.branding_logo_upload",
     resource_type: "branding",
     resource_id: null,

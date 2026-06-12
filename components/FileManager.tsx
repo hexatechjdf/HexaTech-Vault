@@ -18,7 +18,7 @@ import { createPortal } from "react-dom";
 import {
   Upload, FolderPlus, FileText, Folder as FolderIcon, ChevronRight,
   RefreshCw, MoreVertical, Trash2, Download, X, ExternalLink, ArrowLeft, Check,
-  ShieldCheck, UserPlus, Undo2, ChevronDown, Copy,
+  Undo2, Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -37,13 +37,12 @@ import {
   useCloneProposal,
   type TrashItem,
 } from "@/lib/queries/drive-files";
-import { useFolderPermissions, useSetPermission, useRevokePermission } from "@/lib/queries/permissions";
 import { useCanAct } from "@/lib/queries/tab-permissions";
-import { useUsers, useDepartments } from "@/lib/queries/users";
+import { useDepartments } from "@/lib/queries/users";
 import { Pagination } from "@/components/Pagination";
 import { Loader, SkeletonRows } from "@/components/Loader";
-import type { AppUser, FileDTO, FolderDTO, GrantDTO, PermLevel, Role } from "@/lib/types";
-import { capabilities, PERM_LABELS, PERM_LEVELS } from "@/lib/permissions";
+import type { FileDTO, FolderDTO, PermLevel, Role } from "@/lib/types";
+import { capabilities } from "@/lib/permissions";
 
 interface FileManagerProps { role?: Role }
 
@@ -203,7 +202,6 @@ export function FileManager(_props: FileManagerProps) {
     | { kind: "file"; file: FileDTO }
     | null
   >(null);
-  const [accessFolder, setAccessFolder] = useState<FolderDTO | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   // Anchor coords for the currently-open action menu, captured from the
   // trigger button's bounding rect when the user clicks it. We render the
@@ -539,10 +537,6 @@ export function FileManager(_props: FileManagerProps) {
                         style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#374151", fontFamily: "'Poppins', sans-serif", textAlign: "left", textDecoration: "none", boxSizing: "border-box" }}>
                         <ExternalLink size={12} /> Open in Drive
                       </a>
-                      <button onClick={() => { setAccessFolder(f); setOpenMenu(null); }}
-                        style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#374151", fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
-                        <ShieldCheck size={12} /> Manage access
-                      </button>
                       {isSuperAdmin && (
                         <button onClick={() => { setDeleteTarget({ kind: "folder", folder: f }); setOpenMenu(null); }}
                           style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "#ef4444", fontFamily: "'Poppins', sans-serif", textAlign: "left" }}>
@@ -587,8 +581,28 @@ export function FileManager(_props: FileManagerProps) {
                         <Download size={12} /> Download
                       </button>
                       {isInProposalFolder && (
-                        <button onClick={() => { setCloneTarget(f); setOpenMenu(null); }}
-                          style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", textAlign: "left", fontWeight: 600 }}>
+                        <button
+                          onClick={() => { if (!canCreate) return; setCloneTarget(f); setOpenMenu(null); }}
+                          disabled={!canCreate}
+                          aria-disabled={!canCreate}
+                          title={!canCreate ? "You do not have access to take actions" : undefined}
+                          style={{
+                            width: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "9px 14px",
+                            background: "none",
+                            border: "none",
+                            cursor: canCreate ? "pointer" : "not-allowed",
+                            fontSize: "12px",
+                            color: canCreate ? "var(--brand-primary)" : "#9ca3af",
+                            fontFamily: "'Poppins', sans-serif",
+                            textAlign: "left",
+                            fontWeight: 600,
+                            opacity: canCreate ? 1 : 0.6,
+                          }}
+                        >
                           <Copy size={12} /> Clone
                         </button>
                       )}
@@ -693,14 +707,6 @@ export function FileManager(_props: FileManagerProps) {
             setPickedParent(picked);
             setPickerOpen(false);
           }}
-        />
-      )}
-
-      {/* Manage access modal — Drive-native sharing for user grants */}
-      {accessFolder && (
-        <ManageAccessModal
-          folder={accessFolder}
-          onClose={() => setAccessFolder(null)}
         />
       )}
 
@@ -889,241 +895,6 @@ function FolderPicker({
   );
 }
 
-// ─── Manage Access modal ───────────────────────────────────────────────────
-// Lists current per-user grants on a folder; lets a super_admin add a new user
-// grant, change a level, or revoke. Each change also calls Drive's
-// permissions API server-side (permissions-set Edge Function) so the team
-// member can open the folder in their own Drive.
-//
-// Department / role grants aren't editable here (they're managed app-side
-// elsewhere); they appear as read-only chips at the top so the user knows the
-// folder isn't just user-by-user.
-function ManageAccessModal({
-  folder,
-  onClose,
-}: {
-  folder: FolderDTO;
-  onClose: () => void;
-}) {
-  const grantsQuery = useFolderPermissions(folder.id);
-  const usersQuery = useUsers();
-  const setPermission = useSetPermission();
-  const revoke = useRevokePermission();
-
-  // Per-grant "in-flight" tracker. The level dropdown / revoke icon get
-  // replaced by a Loader while the mutation is in flight, so the user only
-  // sees the new level after the server confirms it (or stays on the old
-  // level if the call errors out).
-  const [pendingChangeFor, setPendingChangeFor] = useState<string | null>(null);
-  const [pendingRevokeFor, setPendingRevokeFor] = useState<string | null>(null);
-
-  const grants = grantsQuery.data ?? [];
-  const users = usersQuery.data ?? [];
-  const loading = grantsQuery.isLoading || usersQuery.isLoading;
-
-  const userGrants = grants.filter((g) => g.principalType === "user");
-  const nonUserGrants = grants.filter((g) => g.principalType !== "user");
-
-  // Build a map of userId → user for fast lookup.
-  const userById = useMemo(() => {
-    const m = new Map<string, AppUser>();
-    for (const u of users) m.set(u.id, u);
-    return m;
-  }, [users]);
-
-  // Users not yet granted on this folder - for the "Add user" select.
-  // Super admins are excluded entirely: they own the company Drive and already
-  // have full_control everywhere, so a grant on them would be meaningless.
-  const eligibleUsers = useMemo(() => {
-    const granted = new Set(userGrants.map((g) => g.principalId));
-    return users.filter((u) => u.status === "active" && u.role !== "super_admin" && !granted.has(u.id));
-  }, [users, userGrants]);
-
-  const [addUserId, setAddUserId] = useState("");
-  // Default to 'no_access' so the form starts in a neutral state. Super Admin
-  // must explicitly pick a real access level before the Add button activates.
-  const [addLevel, setAddLevel] = useState<PermLevel>("no_access");
-
-  async function handleAddGrant() {
-    if (!addUserId) { toast.error("Pick a team member"); return; }
-    if (addLevel === "no_access") { toast.error("Pick an access level"); return; }
-    // Snapshot the values we just submitted - we'll revert addLevel back to
-    // 'no_access' on error so the dropdown clearly signals the change didn't
-    // take. The user's pick is preserved in the toast.
-    const submittedLevel = addLevel;
-    try {
-      await setPermission.mutateAsync({
-        folderId: folder.id,
-        principalType: "user",
-        principalId: addUserId,
-        level: submittedLevel,
-      });
-      const name = userById.get(addUserId)?.name ?? "User";
-      toast.success(`${name} granted ${PERM_LABELS[submittedLevel]}`);
-      // Success: clear the form.
-      setAddUserId("");
-      setAddLevel("no_access");
-    } catch (e) {
-      toast.error((e as Error).message || "Failed to grant access");
-      // Error: revert the level dropdown to 'No Access' so the user knows the
-      // grant didn't persist. They can pick again and retry.
-      setAddLevel("no_access");
-    }
-  }
-
-  async function handleChangeLevel(grant: GrantDTO, level: PermLevel) {
-    if (grant.level === level) return; // no-op
-    setPendingChangeFor(grant.id);
-    try {
-      await setPermission.mutateAsync({
-        folderId: folder.id,
-        principalType: "user",
-        principalId: grant.principalId,
-        level,
-      });
-      toast.success(`${grant.principalLabel} → ${PERM_LABELS[level]}`);
-    } catch (e) {
-      toast.error((e as Error).message || "Failed to update level");
-    } finally {
-      setPendingChangeFor(null);
-    }
-  }
-
-  async function handleRevoke(grant: GrantDTO) {
-    setPendingRevokeFor(grant.id);
-    try {
-      await revoke.mutateAsync({
-        folderId: folder.id,
-        principalType: "user",
-        principalId: grant.principalId,
-      });
-      toast.success(`${grant.principalLabel} revoked`);
-    } catch (e) {
-      toast.error((e as Error).message || "Failed to revoke");
-    } finally {
-      setPendingRevokeFor(null);
-    }
-  }
-
-  const busy = setPermission.isPending || revoke.isPending;
-
-  return (
-    <Modal title={`Manage access — ${folder.name}`} onClose={onClose}>
-      <p style={{ margin: "0 0 16px", fontSize: "12px", color: "#6b7280", fontFamily: "'Poppins', sans-serif", lineHeight: 1.5 }}>
-        Grants are mirrored into Google Drive so each user can open the folder in their own Drive. The email on file must be a valid Google account.
-      </p>
-
-      {loading && (
-        <div style={{ padding: "16px", textAlign: "center", color: "#9ca3af", fontSize: "13px", fontFamily: "'Poppins', sans-serif" }}>
-          Loading…
-        </div>
-      )}
-
-      {!loading && nonUserGrants.length > 0 && (
-        <div style={{ marginBottom: "14px" }}>
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "#9ca3af", letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px", fontFamily: "'Poppins', sans-serif" }}>
-            Department / role grants
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-            {nonUserGrants.map((g) => (
-              <span key={g.id} style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "4px 10px", background: "#f4f5f7", border: "1px solid #eef0f4", borderRadius: "999px", fontSize: "11px", color: "#374151", fontFamily: "'Poppins', sans-serif" }}>
-                <span style={{ fontWeight: 600 }}>{g.principalLabel}</span>
-                <span style={{ color: "#9ca3af" }}>· {PERM_LABELS[g.level]}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!loading && (
-        <div>
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "#9ca3af", letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px", fontFamily: "'Poppins', sans-serif" }}>
-            Users with direct access
-          </div>
-          {userGrants.length === 0 ? (
-            <div style={{ padding: "14px", textAlign: "center", color: "#9ca3af", fontSize: "12px", background: "#f8f9fc", borderRadius: "10px", border: "1px solid #eef0f4", fontFamily: "'Poppins', sans-serif", marginBottom: "16px" }}>
-              No team members granted yet. Add one below.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
-              {userGrants.map((g) => {
-                const u = userById.get(g.principalId);
-                const isChanging = pendingChangeFor === g.id;
-                const isRevoking = pendingRevokeFor === g.id;
-                // While this row's mutation is in flight, dim the row and
-                // disable the other control so the user can't fire a second
-                // request mid-flight.
-                const rowBusy = isChanging || isRevoking;
-                return (
-                  <div key={g.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", background: "#f8f9fc", border: "1px solid #eef0f4", borderRadius: "10px", opacity: rowBusy ? 0.85 : 1, transition: "opacity 150ms" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {g.principalLabel}
-                      </div>
-                      <div style={{ fontSize: "11px", color: u?.googleEmail ? "#9ca3af" : "#b45309", fontFamily: "'Poppins', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        Drive: {u?.googleEmail ?? u?.email ?? "—"}{!u?.googleEmail && " (login email — user should set a Drive email in their Profile)"}
-                      </div>
-                    </div>
-                    <AccessLevelPicker
-                      value={g.level}
-                      onChange={(l) => handleChangeLevel(g, l)}
-                      disabled={busy || rowBusy}
-                      isPending={isChanging}
-                      pendingLabel="Updating…"
-                      size="sm"
-                    />
-                    <button onClick={() => handleRevoke(g)} disabled={busy || rowBusy}
-                      title={isRevoking ? "Revoking…" : "Revoke"}
-                      style={{ width: "26px", height: "26px", borderRadius: "6px", border: "1px solid #fee2e2", background: "#fef2f2", cursor: (busy || rowBusy) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {isRevoking ? <Loader size="sm" /> : <X size={12} color="#ef4444" />}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Add new user grant */}
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "#9ca3af", letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: "6px", fontFamily: "'Poppins', sans-serif" }}>
-            Add team member
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 130px auto", gap: "8px", alignItems: "center" }}>
-            <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)} disabled={busy || eligibleUsers.length === 0}
-              style={{ padding: "9px 10px", border: "1.5px solid #e5e7eb", borderRadius: "10px", fontSize: "13px", background: "white", color: "#1f2937", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: busy ? "not-allowed" : "pointer" }}>
-              <option value="">{eligibleUsers.length ? "Pick a team member…" : "Everyone already has a grant"}</option>
-              {eligibleUsers.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} · Drive: {u.googleEmail ?? `${u.email} (no Drive email)`}
-                </option>
-              ))}
-            </select>
-            <AccessLevelPicker
-              value={addLevel}
-              onChange={setAddLevel}
-              disabled={busy}
-              isPending={setPermission.isPending}
-              pendingLabel="Adding…"
-              includeNoAccess
-              size="md"
-            />
-            <button onClick={handleAddGrant} disabled={busy || !addUserId || addLevel === "no_access"}
-              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 14px", background: (!addUserId || busy || addLevel === "no_access") ? "#9ca3af" : "linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light))", color: "white", border: "none", borderRadius: "10px", cursor: (!addUserId || busy || addLevel === "no_access") ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "'Poppins', sans-serif" }}>
-              <UserPlus size={13} /> {setPermission.isPending ? "Adding…" : "Add"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
-        <button onClick={onClose}
-          style={{ flex: 1, padding: "11px", border: "1.5px solid #e5e7eb", borderRadius: "10px", background: "white", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "#374151", fontFamily: "'Poppins', sans-serif" }}>
-          Close
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
 // ─── Generic modal ──────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number | string }) {
   return (
@@ -1270,146 +1041,3 @@ function TrashModal({
   );
 }
 
-// ─── Access level picker ────────────────────────────────────────────────────
-//
-// Custom dropdown for permission levels. Native <select> has a brief flash
-// where the browser displays the user's pick BEFORE React reconciles the
-// controlled value back to the cached server value - the user perceives this
-// as "the new level got selected instantly even though the API is still
-// running." This component closes that gap:
-//
-//   1. Trigger button NEVER displays the user-picked option.
-//   2. Click the trigger to open the popover.
-//   3. Click an option -> popover closes, onChange fires.
-//   4. The parent flips isPending=true; this component renders the inline
-//      Loader in the same slot, no <select> involved at all.
-//   5. On success the parent re-renders with the new `value` -> trigger
-//      shows it. On error the parent's `value` stays unchanged -> trigger
-//      shows the original level.
-//
-// Used in: existing-grant level slot (size="md") and Add-grant level slot
-// (size="lg" + includeNoAccess).
-
-interface AccessLevelPickerProps {
-  value: PermLevel;
-  onChange: (level: PermLevel) => void;
-  disabled?: boolean;
-  isPending?: boolean;
-  /** Text shown next to the spinner while isPending. Default: "Updating…". */
-  pendingLabel?: string;
-  /** Include 'no_access' as a pickable option. Default false. */
-  includeNoAccess?: boolean;
-  /** "sm" matches the existing-grant compact slot; "md" matches the Add row. */
-  size?: "sm" | "md";
-}
-
-function AccessLevelPicker({
-  value, onChange, disabled, isPending, pendingLabel = "Updating…",
-  includeNoAccess = false, size = "sm",
-}: AccessLevelPickerProps) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  // Close popover on click outside.
-  useEffect(() => {
-    if (!open) return;
-    function handler(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const padding = size === "sm" ? "5px 8px" : "9px 10px";
-  const fontSize = size === "sm" ? "11px" : "13px";
-  const borderRadius = size === "sm" ? "6px" : "10px";
-  const minWidth = size === "sm" ? 0 : 130;
-  const minHeight = size === "sm" ? "auto" : "42px";
-
-  if (isPending) {
-    return (
-      <div
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", padding, border: "1.5px solid #e5e7eb", borderRadius, background: "white", minWidth, minHeight }}
-        role="status" aria-live="polite" aria-label={pendingLabel}
-      >
-        <Loader size="sm" />
-        <span className="loader-text-pulse" style={{ fontSize: "11px", color: "#6b7280", fontFamily: "'Poppins', sans-serif" }}>
-          {pendingLabel}
-        </span>
-      </div>
-    );
-  }
-
-  const options: PermLevel[] = includeNoAccess
-    ? (PERM_LEVELS as PermLevel[])
-    : (PERM_LEVELS.filter((l) => l !== "no_access") as PermLevel[]);
-
-  const isNeutral = value === "no_access" && includeNoAccess;
-  const labelColor = isNeutral ? "#9ca3af" : "#374151";
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative", minWidth }}>
-      <button
-        type="button"
-        onClick={() => !disabled && setOpen((v) => !v)}
-        disabled={disabled}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px",
-          width: "100%", padding, border: "1.5px solid #e5e7eb", borderRadius,
-          background: "white", color: labelColor, fontSize, fontWeight: 600,
-          cursor: disabled ? "not-allowed" : "pointer",
-          fontFamily: "'Poppins', sans-serif", outline: "none", textAlign: "left",
-        }}
-      >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {PERM_LABELS[value]}
-        </span>
-        <ChevronDown size={size === "sm" ? 11 : 14} color="#9ca3af" />
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          style={{
-            position: "absolute", top: "calc(100% + 4px)", right: 0,
-            minWidth: "100%", width: "max-content",
-            background: "white", border: "1px solid #e5e7eb",
-            borderRadius: "10px", boxShadow: "0 12px 32px rgba(0,0,0,0.15)",
-            zIndex: 50, overflow: "hidden", fontFamily: "'Poppins', sans-serif",
-          }}
-        >
-          {options.map((opt) => {
-            const isActive = opt === value;
-            return (
-              <button
-                key={opt}
-                type="button"
-                role="option"
-                aria-selected={isActive}
-                onClick={() => { setOpen(false); onChange(opt); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: "8px",
-                  width: "100%", padding: "9px 14px", border: "none",
-                  background: isActive ? "color-mix(in srgb, var(--brand-primary) 6%, white)" : "white",
-                  color: isActive ? "var(--brand-primary)" : "#374151",
-                  fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                  fontFamily: "'Poppins', sans-serif", textAlign: "left",
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.background = "#f8f9fc";
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) e.currentTarget.style.background = "white";
-                }}
-              >
-                {isActive && <Check size={11} color="var(--brand-accent)" />}
-                <span style={{ flex: 1 }}>{PERM_LABELS[opt]}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}

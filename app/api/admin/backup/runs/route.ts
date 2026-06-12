@@ -1,12 +1,13 @@
 // GET /api/admin/backup/runs?limit=NN
 //
-// Returns recent backup_runs entries (super_admin only). RLS already restricts
-// SELECT to super_admin, but we gate at the BFF too to keep failure responses
-// consistent with the rest of the admin surface and to validate the limit.
+// Returns recent backup_runs entries. Gated by the Tab Permission engine:
+// caller must hold settings ≥ view (super_admin short-circuits). Reads with
+// the service-role client because the underlying RLS policies on
+// backup_runs only allow super_admin SELECT.
 
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { requireTabLevel } from "@/lib/server/require-tab-level";
 
 export const dynamic = 'force-dynamic';
 
@@ -39,17 +40,8 @@ function bad(msg: string, status = 400) {
 }
 
 export async function GET(req: Request) {
-  const supabase = createSupabaseServerClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  if (!authUser) return bad("Not signed in", 401);
-
-  const { data: caller } = await supabase
-    .from("app_users")
-    .select("id, role, status")
-    .eq("id", authUser.id)
-    .maybeSingle();
-  if (!caller || caller.status !== "active") return bad("Account inactive", 403);
-  if (caller.role !== "super_admin") return bad("Super admin only", 403);
+  const gate = await requireTabLevel(req, "settings", "view");
+  if (gate instanceof NextResponse) return gate;
 
   const url = new URL(req.url);
   const rawLimit = parseInt(url.searchParams.get("limit") ?? "20", 10);

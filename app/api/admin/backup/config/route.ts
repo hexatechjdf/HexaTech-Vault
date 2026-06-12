@@ -13,8 +13,12 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
+import { resolveTabLevel } from "@/lib/server/require-tab-level";
+import type { TabLevel } from "@/lib/tabs";
 
 export const dynamic = 'force-dynamic';
+
+const LEVEL_RANK: Record<TabLevel, number> = { no_access: 0, view: 1, action: 2 };
 
 const FREQUENCIES = ["daily", "weekly", "monthly"] as const;
 type Frequency = (typeof FREQUENCIES)[number];
@@ -41,7 +45,10 @@ function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function resolveSuperAdmin() {
+// Gates on the settings tab engine (the Backup UI lives inside Settings).
+// Super admins always pass. Everyone else needs the required level
+// (view for reads, action for writes).
+async function resolveCaller(required: TabLevel) {
   const supabase = createSupabaseServerClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) return { error: bad("Not signed in", 401) } as const;
@@ -54,14 +61,18 @@ async function resolveSuperAdmin() {
   if (!caller || caller.status !== "active") {
     return { error: bad("Account inactive", 403) } as const;
   }
+
   if (caller.role !== "super_admin") {
-    return { error: bad("Super admin only", 403) } as const;
+    const level = await resolveTabLevel(authUser.id, "settings");
+    if (LEVEL_RANK[level] < LEVEL_RANK[required]) {
+      return { error: bad("Insufficient permission on Settings", 403) } as const;
+    }
   }
   return { caller } as const;
 }
 
 export async function GET() {
-  const r = await resolveSuperAdmin();
+  const r = await resolveCaller("view");
   if ("error" in r) return r.error;
 
   const admin = createSupabaseAdminClient();
@@ -82,7 +93,7 @@ interface UpdateBody {
 }
 
 export async function PUT(req: Request) {
-  const r = await resolveSuperAdmin();
+  const r = await resolveCaller("action");
   if ("error" in r) return r.error;
 
   const body = (await req.json().catch(() => ({}))) as UpdateBody;

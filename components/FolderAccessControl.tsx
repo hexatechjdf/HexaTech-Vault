@@ -16,6 +16,7 @@ import { useAccessTree, useSetPermission, type AccessTreeGrant } from "@/lib/que
 import { useUsers, useDepartments, type UserWithPermissions } from "@/lib/queries/users";
 import { useCanAct } from "@/lib/queries/tab-permissions";
 import { UserEffectiveAccess } from "@/components/UserEffectiveAccess";
+import { Skeleton } from "@/components/Loader";
 
 /** Sentinel value used by the scope picker to mean "no department scope" — the
  *  grant applies to every user with the selected role across every department.
@@ -463,7 +464,76 @@ export function FolderAccessControl() {
       )}
 
       {loading ? (
-        <div style={{ color: "#9ca3af", fontSize: "13px" }}>Loading folders and permissions…</div>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Loading folders and permissions"
+          style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "18px" }}
+        >
+          {/* Left rail skeleton — mirrors the principal list */}
+          <div style={{ background: "white", borderRadius: "16px", border: "1px solid #eef0f4", overflow: "hidden", height: "fit-content", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid #f4f5f7" }}>
+              <Skeleton width={120} height={11} rounded="md" />
+            </div>
+            <div>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 18px", borderBottom: "1px solid #f9fafb" }}>
+                  <Skeleton width={34} height={34} rounded="lg" />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <Skeleton width={`${55 + ((i * 7) % 25)}%`} height={11} rounded="md" />
+                    <Skeleton width={`${30 + ((i * 5) % 20)}%`} height={9} rounded="md" />
+                  </div>
+                  <Skeleton width={48} height={18} rounded="pill" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right pane skeleton — mirrors the folder tree + permission selects */}
+          <div style={{ background: "white", borderRadius: "16px", border: "1px solid #eef0f4", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #f4f5f7", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <Skeleton width={200} height={12} rounded="md" />
+                <Skeleton width={130} height={9} rounded="md" />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} width={68} height={14} rounded="md" />
+                ))}
+              </div>
+            </div>
+            <div style={{ padding: "12px 14px", borderBottom: "1px solid #f9fafb", background: "#fafbfc" }}>
+              <Skeleton width={220} height={10} rounded="md" />
+            </div>
+            <div style={{ padding: "6px 14px 14px" }}>
+              {Array.from({ length: 8 }).map((_, i) => {
+                const depth = [0, 0, 1, 0, 1, 2, 0, 1][i] ?? 0;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "10px 12px",
+                      paddingLeft: `${12 + depth * 20}px`,
+                      borderRadius: "10px",
+                      marginBottom: "2px",
+                    }}
+                  >
+                    <Skeleton width={14} height={14} rounded="sm" />
+                    <Skeleton width={18} height={18} rounded="md" />
+                    <Skeleton width={`${40 + ((i * 11) % 30)}%`} height={11} rounded="md" />
+                    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Skeleton width={56} height={16} rounded="pill" />
+                      <Skeleton width={108} height={26} rounded="md" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "18px" }}>
           {/* Principal list */}
@@ -485,7 +555,7 @@ export function FolderAccessControl() {
                       <div style={{ fontWeight: 600, color: "var(--brand-primary)", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.label}</div>
                       <div style={{ color: "#9ca3af", fontSize: "11px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.sub}</div>
                     </div>
-                    {userMeta && <PermissionsCountBadge user={userMeta} />}
+                    {active && userMeta && <PermissionsCountBadge user={userMeta} />}
                   </button>
                 );
               })}
@@ -555,7 +625,8 @@ export function FolderAccessControl() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: "white", borderRadius: "20px", padding: "32px", width: "720px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", position: "relative", fontFamily: "'Poppins', sans-serif" }}
+            className="brand-scroll"
+            style={{ background: "white", borderRadius: "8px", padding: "32px", width: "720px", maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", position: "relative", fontFamily: "'Poppins', sans-serif" }}
           >
             <button
               onClick={() => setViewAccessFor(null)}

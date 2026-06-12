@@ -8,8 +8,8 @@
 // Supabase Storage is fast and cheap.
 
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { requireTabLevel } from "@/lib/server/require-tab-level";
 
 export const dynamic = 'force-dynamic';
 
@@ -20,20 +20,11 @@ function bad(msg: string, status = 400) {
 const SIGNED_URL_TTL_SECONDS = 300; // 5 minutes — enough for a manual download.
 
 export async function GET(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const supabase = createSupabaseServerClient();
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  if (!authUser) return bad("Not signed in", 401);
-
-  const { data: caller } = await supabase
-    .from("app_users")
-    .select("id, role, status")
-    .eq("id", authUser.id)
-    .maybeSingle();
-  if (!caller || caller.status !== "active") return bad("Account inactive", 403);
-  if (caller.role !== "super_admin") return bad("Super admin only", 403);
+  const gate = await requireTabLevel(req, "settings", "action");
+  if (gate instanceof NextResponse) return gate;
 
   const { id } = await context.params;
   if (!id) return bad("Missing run id");

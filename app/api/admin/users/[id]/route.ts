@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getClientIp } from "@/lib/server/client-ip";
+import { resolveTabLevel } from "@/lib/server/require-tab-level";
 import type { Role } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,12 @@ function bad(message: string, status = 400) {
 
 interface RouteCtx { params: { id: string } }
 
-async function authorizeSuperAdmin() {
+// Gates mutations on the user_management tab engine. Super admins always pass.
+// Everyone else needs an explicit `user_management:action` grant. We also
+// keep caller.role around because a few sub-actions (promoting someone to
+// super_admin, OR touching an existing super_admin) are escalations that
+// stay super-admin-only regardless of tab grant.
+async function authorizeForUserMgmt() {
   const supabase = createSupabaseServerClient();
   const { data: { user: authUser } } = await supabase.auth.getUser();
   if (!authUser) return { error: bad("Not signed in", 401) } as const;
@@ -44,9 +50,13 @@ async function authorizeSuperAdmin() {
   if (callerErr) return { error: bad("Failed to load caller profile", 500) } as const;
   if (!caller) return { error: bad("No profile for caller", 403) } as const;
   if (caller.status !== "active") return { error: bad("Account inactive", 403) } as const;
-  if (caller.role !== "super_admin") return { error: bad("Super admin only", 403) } as const;
 
-  return { caller, supabase } as const;
+  if (caller.role !== "super_admin") {
+    const level = await resolveTabLevel(authUser.id, "user_management");
+    if (level !== "action") return { error: bad("Insufficient permission on User Management", 403) } as const;
+  }
+
+  return { caller: { id: caller.id, role: caller.role as Role }, supabase } as const;
 }
 
 async function loadTarget(admin: ReturnType<typeof createSupabaseAdminClient>, id: string) {
@@ -61,7 +71,7 @@ async function loadTarget(admin: ReturnType<typeof createSupabaseAdminClient>, i
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const auth = await authorizeSuperAdmin();
+  const auth = await authorizeForUserMgmt();
   if ("error" in auth) return auth.error;
   const { caller } = auth;
 
@@ -88,6 +98,15 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
   const targetRes = await loadTarget(admin, targetId);
   if ("error" in targetRes) return targetRes.error;
   const { target } = targetRes;
+
+  // System-level guard: any operation that touches an EXISTING super_admin
+  // (edit / demote / deactivate / reset password) stays super-admin-only,
+  // even for callers who hold user_management:action. Super admin is the
+  // system root and the tab engine should not be able to grant escalation
+  // into it. Promoting someone TO super_admin is handled in update_role.
+  if (target.role === "super_admin" && caller.role !== "super_admin") {
+    return bad("Only super admins can modify a super admin", 403);
+  }
 
   if (action === "update_profile") {
     const name = body.name === undefined ? undefined : String(body.name).trim();
@@ -122,6 +141,13 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     const role = String(body.role ?? "") as Role;
     const departmentId = String(body.departmentId ?? "").trim();
     if (!VALID_ROLES.includes(role)) return bad("Invalid role", 422);
+
+    // System-level guard: promoting to super_admin stays super-admin-only.
+    // user_management:action does NOT confer the ability to create new
+    // super admins — that's a system root operation.
+    if (role === "super_admin" && caller.role !== "super_admin") {
+      return bad("Only super admins can promote users to super admin", 403);
+    }
 
     const requiresDept = role !== "super_admin" && role !== "admin";
     if (requiresDept && !departmentId) return bad("Department is required for this role", 422);
@@ -222,7 +248,7 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
 }
 
 export async function DELETE(req: Request, ctx: RouteCtx) {
-  const auth = await authorizeSuperAdmin();
+  const auth = await authorizeForUserMgmt();
   if ("error" in auth) return auth.error;
   const { caller } = auth;
 
@@ -241,6 +267,11 @@ export async function DELETE(req: Request, ctx: RouteCtx) {
   if ("error" in targetRes) return targetRes.error;
   const { target } = targetRes;
 
+  // System-level guard: deleting a super_admin stays super-admin-only.
+  if (target.role === "super_admin" && caller.role !== "super_admin") {
+    return bad("Only super admins can delete a super admin", 403);
+  }
+
   if (target.role === "super_admin") {
     const { count } = await admin
       .from("app_users")
@@ -250,8 +281,27 @@ export async function DELETE(req: Request, ctx: RouteCtx) {
     if ((count ?? 0) <= 1) return bad("Cannot delete the last active super admin", 409);
   }
 
+  // Sweep dead per-user grants first. principal_id is text (not a real FK),
+  // so leaving them wouldn't block the delete — but they'd dangle pointing at
+  // a deleted user. We delete grants where principal_type='user' AND
+  // principal_id matches the target. Best-effort: if either fails we still
+  // proceed with the auth delete, because every other "who did this" FK is
+  // covered by migration 0028's ON DELETE SET NULL.
+  await admin
+    .from("permission_grants")
+    .delete()
+    .eq("principal_type", "user")
+    .eq("principal_id", targetId);
+  await admin
+    .from("tab_permission_grants")
+    .delete()
+    .eq("principal_type", "user")
+    .eq("principal_id", targetId);
+
   // Deleting the auth user cascades to app_users via ON DELETE CASCADE
   // (see 0001_schema.sql: app_users.id references auth.users(id) on delete cascade).
+  // Every "who did this" FK on app_users(id) is ON DELETE SET NULL after
+  // migration 0028, so audit/history rows survive with actor_id=null.
   const { error } = await admin.auth.admin.deleteUser(targetId);
   if (error) return bad(error.message || "Failed to delete user", 500);
 
