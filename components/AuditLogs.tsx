@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, Filter, Download, AlertTriangle, Clock, Globe, X, FileText, Table, Eye, Lock } from "lucide-react";
+import { Search, Filter, Download, AlertTriangle, Clock, Globe, X, FileText, Table, Eye, Lock, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { useAuditLogs, type AuditLogEntry } from "@/lib/queries/audit";
 import { Pagination, paginate } from "@/components/Pagination";
@@ -136,6 +136,11 @@ export function AuditLogs({ readOnly = false, department }: Props) {
   const [search, setSearch] = useState(actorParam);
   const [filterAction, setFilterAction] = useState("All");
   const [filterDate, setFilterDate] = useState("All Time");
+  // Track open/closed state per dropdown so we can swap the chevron icon
+  // (down when closed, up when open). The native <select> picker is a
+  // browser/OS surface — we proxy "open" with focus, "closed" with blur.
+  const [actionOpen, setActionOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
   const [showSuspicious, setShowSuspicious] = useState(false);
   const [detailLog, setDetailLog] = useState<AuditLogEntry | null>(null);
   // Client-side pagination. Server returns the full filtered set; we slice in
@@ -339,17 +344,35 @@ export function AuditLogs({ readOnly = false, department }: Props) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <Filter size={14} color="#9ca3af" />
-          <select value={filterAction} onChange={(e) => setFilterAction(e.target.value)}
-            style={{ padding: "8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
-            <option value="All">All actions</option>
-            {allActionCodes.map((code) => (
-              <option key={code} value={code}>{actionLabel(code)}</option>
-            ))}
-          </select>
-          <select value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
-            style={{ padding: "8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
-            {["All Time", "Today", "Last 7 Days", "Last 30 Days"].map((d) => <option key={d}>{d}</option>)}
-          </select>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select value={filterAction}
+              onChange={(e) => { setFilterAction(e.target.value); setActionOpen(false); }}
+              onMouseDown={() => setActionOpen((prev) => !prev)}
+              onBlur={() => setActionOpen(false)}
+              onKeyDown={(e) => { if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setActionOpen(true); if (e.key === "Escape" || e.key === "Tab") setActionOpen(false); }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "8px 36px 8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
+              <option value="All">All actions</option>
+              {allActionCodes.map((code) => (
+                <option key={code} value={code}>{actionLabel(code)}</option>
+              ))}
+            </select>
+            {actionOpen
+              ? <ChevronUp size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select value={filterDate}
+              onChange={(e) => { setFilterDate(e.target.value); setDateOpen(false); }}
+              onMouseDown={() => setDateOpen((prev) => !prev)}
+              onBlur={() => setDateOpen(false)}
+              onKeyDown={(e) => { if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setDateOpen(true); if (e.key === "Escape" || e.key === "Tab") setDateOpen(false); }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "8px 36px 8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
+              {["All Time", "Today", "Last 7 Days", "Last 30 Days"].map((d) => <option key={d}>{d}</option>)}
+            </select>
+            {dateOpen
+              ? <ChevronUp size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
         </div>
         {hasFilters && (
           <button onClick={clearFilters}

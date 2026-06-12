@@ -42,6 +42,21 @@ Add or rename a level → **both** must change in the same commit. See [`/add-pe
 - Always include `IF NOT EXISTS` for additive operations so re-runs are safe.
 - Test against a fresh local Supabase before pushing.
 
+### Migration history — load-bearing migrations to know
+
+The full list lives under [`supabase/migrations/`](../../supabase/migrations/) — `git log --oneline supabase/migrations/` is the authoritative changelog. Migrations beyond `0002` you will likely touch when reading related code:
+
+- `0011_role_dept_audit_rules.sql` — added departmental scoping to role grants in audit_log policies.
+- `0015_remove_department_grants.sql` — **removed department as a grant principal type**. Folder grants are now `user` or `role` only. If you see `principal_type = 'department'` anywhere, that's stale code.
+- `0018_user_wins_permission_engine.sql` — **rewrote `get_effective_level()` to user-wins semantics** (replaced the older max-of-all-grants algorithm). The TS-side resolver in `MockBackend.getEffectiveLevelForUser` and `rules/permissions.md`'s algorithm must agree with this.
+- `0019_backup.sql` + `0020_cron_backup.sql` — backup table + daily pg_cron schedule; consumed by Edge Function `backup-run` and `app/api/admin/backup/*`.
+- `0021_role_dept_grants.sql` — folder grants can now scope to a (role, department) pair via `permission_grants.principal_dept_id`. The Edge Function `permissions-set` fans out role grants to per-user Drive shares (`role_grant_drive_shares` table).
+- `0023_password_reset_tracking.sql` — rate-limit + audit table for user-initiated forgot-password requests.
+- `0024_proposal_label.sql` + `0025_company_short_code.sql` — `Settings` → Company Info; feeds proposal-clone folder naming (Edge Function `proposal-clone`).
+- `0026_tab_permissions.sql` — **tab permission engine** (`tab_name` enum, `tab_level` enum, `tab_permission_grants`, `get_effective_tab_level()`). Mirrored TS-side in [`lib/tabs.ts`](../../lib/tabs.ts).
+- `0027_default_file_manager_access.sql` — seeds 5 baseline grants so every non-super-admin role gets `file_manager=action`. Don't add new tabs with similar "default-on" baselines without explicit discussion.
+- `0028_user_delete_set_null_fks.sql` — converted FK constraints on user-owned rows (audit_log.actor_id, etc.) to `ON DELETE SET NULL` so super-admin hard-delete of an app_user doesn't cascade-destroy their history.
+
 ## The Drive metadata cache
 
 - `folders` and `files` mirror Google Drive under the root. Drive is the source of truth for **file bytes**; Postgres is the source of truth for **permissions, ownership, and the user-facing tree**.

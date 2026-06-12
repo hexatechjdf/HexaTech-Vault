@@ -21,6 +21,7 @@ import {
   Search, Plus, Filter, MoreVertical, Edit, Trash2,
   FolderOpen, KeyRound, UserCheck, UserX, Eye, ScanEye,
   ShieldCheck, CheckCircle, XCircle, X, RefreshCw, AlertTriangle,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import { UserEffectiveAccess } from "@/components/UserEffectiveAccess";
 import { toast } from "sonner";
@@ -140,6 +141,10 @@ export function UserManagement() {
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState<"All" | Role>("All");
   const [filterStatus, setFilterStatus] = useState<"All" | "active" | "inactive">("All");
+  // Track open/closed state per filter dropdown so the chevron icon flips
+  // (down when closed, up when open). Mirrors the pattern in AuditLogs.tsx.
+  const [roleOpen, setRoleOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   // Anchor coords for the currently-open row action menu, captured from the
   // trigger button's bounding rect. We render the dropdown via createPortal
@@ -426,17 +431,35 @@ export function UserManagement() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <Filter size={14} color="#9ca3af" />
-          <select value={filterRole} onChange={(e) => setFilterRole(e.target.value as "All" | Role)}
-            style={{ padding: "8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
-            <option value="All">All roles</option>
-            {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-          </select>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as "All" | "active" | "inactive")}
-            style={{ padding: "8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
-            <option value="All">All statuses</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select value={filterRole}
+              onChange={(e) => { setFilterRole(e.target.value as "All" | Role); setRoleOpen(false); }}
+              onMouseDown={() => setRoleOpen((prev) => !prev)}
+              onBlur={() => setRoleOpen(false)}
+              onKeyDown={(e) => { if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setRoleOpen(true); if (e.key === "Escape" || e.key === "Tab") setRoleOpen(false); }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "8px 36px 8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
+              <option value="All">All roles</option>
+              {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            </select>
+            {roleOpen
+              ? <ChevronUp size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select value={filterStatus}
+              onChange={(e) => { setFilterStatus(e.target.value as "All" | "active" | "inactive"); setStatusOpen(false); }}
+              onMouseDown={() => setStatusOpen((prev) => !prev)}
+              onBlur={() => setStatusOpen(false)}
+              onKeyDown={(e) => { if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setStatusOpen(true); if (e.key === "Escape" || e.key === "Tab") setStatusOpen(false); }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "8px 36px 8px 12px", border: "1.5px solid #f0f0f0", borderRadius: "10px", fontSize: "13px", background: "#f8f9fc", color: "#374151", outline: "none", fontFamily: "'Poppins', sans-serif", cursor: "pointer" }}>
+              <option value="All">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            {statusOpen
+              ? <ChevronUp size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={16} color="#6b7280" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
         </div>
         {(search || filterRole !== "All" || filterStatus !== "All") && (
           <button onClick={() => { setSearch(""); setFilterRole("All"); setFilterStatus("All"); }}

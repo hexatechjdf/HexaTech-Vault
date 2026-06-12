@@ -11,7 +11,7 @@
 // list them as a grantable principal here.
 
 import { useMemo, useState } from "react";
-import { User as UserIcon, Briefcase, Building2, Info } from "lucide-react";
+import { User as UserIcon, Briefcase, Building2, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import type { Role } from "@/lib/types";
 import { TAB_NAMES, TAB_LABELS, TAB_LEVELS, TAB_LEVEL_LABELS, type TabName, type TabLevel } from "@/lib/tabs";
@@ -70,6 +70,15 @@ export function TabAccessControl() {
 
   // Track in-flight changes per tab so we can spin only the row being edited.
   const [pending, setPending] = useState<Set<TabName>>(new Set());
+
+  // Which tab's Actions dropdown is currently open, so its chevron icon can
+  // flip (down → up). Only one OS picker can show at a time so a single
+  // TabName | null is sufficient. The onBlur guard `prev === tab ? null : prev`
+  // prevents a cross-tab race where closing tab A's blur clobbers tab B's
+  // freshly-set open state when the user clicks B while A is still focused.
+  const [openTab, setOpenTab] = useState<TabName | null>(null);
+  // Open/closed state for the Scope (department) dropdown above the matrix.
+  const [scopeOpen, setScopeOpen] = useState(false);
 
   // ── Resolve the effective level for each tab, scoped to the selected principal ──
   //
@@ -218,16 +227,27 @@ export function TabAccessControl() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px", padding: "10px 14px", background: "color-mix(in srgb, var(--brand-accent) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--brand-accent) 18%, transparent)", borderRadius: "12px" }}>
           <Building2 size={14} color="var(--brand-accent)" />
           <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)" }}>Scope:</span>
-          <select
-            value={principalDeptId ?? SCOPE_ALL}
-            onChange={(e) => setPrincipalDeptId(e.target.value === SCOPE_ALL ? null : e.target.value)}
-            style={{ padding: "6px 12px", borderRadius: "8px", border: "1.5px solid #e5e7eb", background: "white", fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", outline: "none", cursor: "pointer", fontFamily: "'Poppins', sans-serif" }}
-          >
-            <option value={SCOPE_ALL}>All departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select
+              value={principalDeptId ?? SCOPE_ALL}
+              onChange={(e) => { setPrincipalDeptId(e.target.value === SCOPE_ALL ? null : e.target.value); setScopeOpen(false); }}
+              onMouseDown={() => setScopeOpen((prev) => !prev)}
+              onBlur={() => setScopeOpen(false)}
+              onKeyDown={(e) => {
+                if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setScopeOpen(true);
+                if (e.key === "Escape" || e.key === "Tab") setScopeOpen(false);
+              }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "6px 30px 6px 12px", borderRadius: "8px", border: "1.5px solid #e5e7eb", background: "white", fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", outline: "none", cursor: "pointer", fontFamily: "'Poppins', sans-serif" }}
+            >
+              <option value={SCOPE_ALL}>All departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            {scopeOpen
+              ? <ChevronUp size={14} color="var(--brand-primary)" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={14} color="var(--brand-primary)" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
           <span style={{ fontSize: "11px", color: "#6b7280", marginLeft: "auto" }}>
             {principalDeptId
               ? "Only users with this role in the selected department will be granted."
@@ -343,7 +363,12 @@ export function TabAccessControl() {
                   )}
                   <span
                     className={isPending ? "pending-border-trace" : undefined}
-                    style={isPending ? { ["--trace-color" as string]: "#10b981" } : undefined}
+                    // Always position: relative + inline-block so the absolute
+                    // chevron overlay anchors here in both pending and idle
+                    // states. When isPending=true the .pending-border-trace CSS
+                    // class sets the same values, so this is just making the
+                    // idle state match.
+                    style={{ position: "relative", display: "inline-block", ...(isPending ? { ["--trace-color" as string]: "#10b981" } : {}) }}
                   >
                     {isPending && (
                       <svg className="pending-border-trace-svg" aria-hidden="true">
@@ -352,15 +377,25 @@ export function TabAccessControl() {
                     )}
                     <select
                       value={level}
-                      onChange={(e) => handleChange(tab, e.target.value as TabLevel)}
+                      onChange={(e) => { handleChange(tab, e.target.value as TabLevel); setOpenTab(null); }}
+                      onMouseDown={() => { if (!isPending) setOpenTab((prev) => (prev === tab ? null : tab)); }}
+                      onBlur={() => setOpenTab((prev) => (prev === tab ? null : prev))}
+                      onKeyDown={(e) => {
+                        if (isPending) return;
+                        if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setOpenTab(tab);
+                        if (e.key === "Escape" || e.key === "Tab") setOpenTab((prev) => (prev === tab ? null : prev));
+                      }}
                       disabled={isPending}
                       aria-busy={isPending}
-                      style={{ padding: "6px 12px", borderRadius: "8px", border: `1.5px solid ${LEVEL_COLORS[level]}40`, background: `${LEVEL_COLORS[level]}10`, color: LEVEL_COLORS[level], fontSize: "12px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: isPending ? "wait" : "pointer", minWidth: "140px", display: "block" }}
+                      style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "6px 30px 6px 12px", borderRadius: "8px", border: `1.5px solid ${LEVEL_COLORS[level]}40`, background: `${LEVEL_COLORS[level]}10`, color: LEVEL_COLORS[level], fontSize: "12px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: isPending ? "wait" : "pointer", minWidth: "140px", display: "block" }}
                     >
                       {TAB_LEVELS.map((lvl) => (
                         <option key={lvl} value={lvl}>{TAB_LEVEL_LABELS[lvl]}</option>
                       ))}
                     </select>
+                    {openTab === tab
+                      ? <ChevronUp size={14} color={LEVEL_COLORS[level]} style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+                      : <ChevronDown size={14} color={LEVEL_COLORS[level]} style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
                   </span>
                 </div>
               );

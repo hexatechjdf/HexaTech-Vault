@@ -9,9 +9,13 @@ Apply when touching anything under `app/` (except `app/api/`), `components/`, or
 - **Inline styles + lucide-react are the established pattern** for feature components (`FileManager`, `FolderAccessControl`, `Settings`, etc.). Don't migrate them to shadcn primitives without a specific reason.
 - **`components/ui/*` shadcn primitives exist and are imported** by no feature component today. Use them for new shadcn-based components; don't refactor existing ones.
 
-## Data access — never call Supabase or fetch directly from a component
+## Data access — never call Supabase or `fetch()` directly from a component
 
-Use the **`Backend`** abstraction:
+There are **two parallel data layers**. Pick the right one for the data you need:
+
+### 1. `Backend` abstraction — Drive-touching operations
+
+Use for anything that ultimately calls Google Drive (list folder, upload/download/delete file, create folder, grant folder permission).
 
 ```ts
 import { getBackend } from "@/lib/backend";
@@ -20,7 +24,59 @@ const backend = useMemo(() => getBackend(), []);
 const folders = await backend.list(folderId);
 ```
 
-`getBackend()` returns `MockBackend` in mock mode and `SupabaseBackend` in supabase mode. Adding a new operation = add a method to [`lib/backend/contract.ts`](../../lib/backend/contract.ts) + implement in both. No exceptions — components calling `fetch()` or Supabase clients directly will be rejected in review.
+`getBackend()` returns `MockBackend` in mock mode and `SupabaseBackend` in supabase mode. Adding a new Drive-touching operation = add a method to [`lib/backend/contract.ts`](../../lib/backend/contract.ts) + implement in both. This is the seam that lets the app run fully without Supabase.
+
+### 2. TanStack React Query — BFF-routed data
+
+Use for everything that comes from the Next.js BFF (`/api/admin/*`, `/api/me/*`): users, audit, branding, backup, tab permissions, effective access, profile, etc. Hooks live in [`lib/queries/`](../../lib/queries/), **one file per feature**.
+
+Provider in [`app/providers.tsx`](../../app/providers.tsx) sets defaults: `staleTime: 60_000`, `refetchOnWindowFocus: false`, `retry: 1`. Override per-query when you need different behaviour (e.g. `useUsers` uses `staleTime: 0` + `refetchOnMount: "always"` because permission chips need to reflect grant changes made on Folder Access Control / Tab Access Control without a manual refresh).
+
+**Pattern to follow** (mirrors [`lib/queries/users.ts`](../../lib/queries/users.ts)):
+
+```ts
+// 1. Query keys — single source of truth. Use the const everywhere; never
+//    inline strings or invalidations silently desync.
+export const fooQueryKeys = {
+  list: ["foo"] as const,
+  one: (id: string) => ["foo", id] as const,
+};
+
+// 2. Fetch helpers — small async functions, no React, throw on non-2xx.
+async function asJson<T>(res: Response, fallbackMsg: string): Promise<T> {
+  const data: unknown = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string })?.error ?? `${fallbackMsg} (${res.status})`);
+  return data as T;
+}
+
+async function fetchFoos(): Promise<Foo[]> {
+  const res = await fetch("/api/admin/foo", { cache: "no-store" });
+  const data = await asJson<{ foos: Foo[] }>(res, "Failed to load foos");
+  return data.foos;
+}
+
+// 3. Hooks — what components import.
+export function useFoos() {
+  return useQuery({ queryKey: fooQueryKeys.list, queryFn: fetchFoos });
+}
+
+// 4. Mutations — invalidate the relevant query key on success.
+export function useUpdateFoo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateFooInput) => patchFoo(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: fooQueryKeys.list }),
+  });
+}
+```
+
+**For PATCH endpoints with multiple actions** (like `/api/admin/users/[id]`), use a single `patch<Resource>(id, body)` helper and dispatch on a `body.action` discriminator. See `useUpdateUserProfile` / `useUpdateUserRole` / `useResetUserPassword` in `lib/queries/users.ts`.
+
+### Which layer for new work?
+
+- Drive-touching? → extend `Backend`, then add a Query hook that wraps it (so the UI gets caching + invalidation).
+- BFF-only? → add the route under `app/api/`, then add the hook in `lib/queries/`.
+- **Never** call `fetch("/api/...")` from a component directly — write the hook. Same review-rejection rule applies to BFF data as to Supabase data.
 
 ## Auth in components
 

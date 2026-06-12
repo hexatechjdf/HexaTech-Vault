@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import {
-  Folder, FolderOpen, ChevronRight, ChevronDown, User, Briefcase, Info, Building2,
+  Folder, FolderOpen, ChevronRight, ChevronDown, ChevronUp, User, Briefcase, Info, Building2,
   ScanEye, ShieldCheck, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -89,6 +89,10 @@ function FolderRow({
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node.id);
   const isPending = pending.has(node.id);
+  // Local open/closed state for THIS row's access-level dropdown so the
+  // chevron icon flips (down when closed, up when open). Mirrors the pattern
+  // used in AuditLogs.tsx and UserManagement.tsx filter dropdowns.
+  const [selectOpen, setSelectOpen] = useState(false);
 
   return (
     <>
@@ -114,7 +118,11 @@ function FolderRow({
         )}
         <span
           className={isPending ? "pending-border-trace" : undefined}
-          style={isPending ? { ["--trace-color" as string]: "#10b981" } : undefined}
+          // Always position: relative + inline-block so the absolute chevron
+          // overlay anchors here in both the pending and idle states. When
+          // isPending=true the .pending-border-trace CSS class sets the same
+          // values, so this is just making the idle state match.
+          style={{ position: "relative", display: "inline-block", ...(isPending ? { ["--trace-color" as string]: "#10b981" } : {}) }}
         >
           {isPending && (
             <svg className="pending-border-trace-svg" aria-hidden="true">
@@ -123,16 +131,26 @@ function FolderRow({
           )}
           <select
             value={perm}
-            onChange={(e) => canAct && onChange(node.id, e.target.value as PermLevel)}
+            onChange={(e) => { if (canAct) onChange(node.id, e.target.value as PermLevel); setSelectOpen(false); }}
+            onMouseDown={() => { if (canAct && !isPending) setSelectOpen((prev) => !prev); }}
+            onBlur={() => setSelectOpen(false)}
+            onKeyDown={(e) => {
+              if (!canAct || isPending) return;
+              if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setSelectOpen(true);
+              if (e.key === "Escape" || e.key === "Tab") setSelectOpen(false);
+            }}
             disabled={isPending || !canAct}
             aria-busy={isPending}
             title={!canAct ? "View-only access on Folder Access Control" : undefined}
-            style={{ padding: "4px 10px", borderRadius: "8px", border: `1.5px solid ${PERM_COLORS[perm]}40`, background: `${PERM_COLORS[perm]}10`, color: PERM_COLORS[perm], fontSize: "11px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: (!canAct ? "not-allowed" : (isPending ? "wait" : "pointer")), display: "block" }}
+            style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "4px 26px 4px 10px", borderRadius: "8px", border: `1.5px solid ${PERM_COLORS[perm]}40`, background: `${PERM_COLORS[perm]}10`, color: PERM_COLORS[perm], fontSize: "11px", fontWeight: 600, fontFamily: "'Poppins', sans-serif", outline: "none", cursor: (!canAct ? "not-allowed" : (isPending ? "wait" : "pointer")), display: "block" }}
           >
             {PERM_LEVELS.map((val) => (
               <option key={val} value={val}>{PERM_LABELS[val]}</option>
             ))}
           </select>
+          {selectOpen
+            ? <ChevronUp size={12} color={PERM_COLORS[perm]} style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+            : <ChevronDown size={12} color={PERM_COLORS[perm]} style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
         </span>
       </div>
       {hasChildren && isExpanded && node.children.map((child) => (
@@ -230,6 +248,9 @@ export function FolderAccessControl() {
   const [principalDeptId, setPrincipalDeptId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
+  // Open/closed state for the Scope (department) dropdown shown above the
+  // folder tree when granting to a role.
+  const [scopeOpen, setScopeOpen] = useState(false);
 
   // One-time initialisation once the data hooks have resolved: resolve the
   // deep-link principal id against the loaded options (or fall back to the
@@ -445,16 +466,27 @@ export function FolderAccessControl() {
           <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif" }}>
             Scope:
           </span>
-          <select
-            value={principalDeptId ?? SCOPE_ALL}
-            onChange={(e) => setPrincipalDeptId(e.target.value === SCOPE_ALL ? null : e.target.value)}
-            style={{ padding: "6px 12px", borderRadius: "8px", border: "1.5px solid #e5e7eb", background: "white", fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", outline: "none", cursor: "pointer" }}
-          >
-            <option value={SCOPE_ALL}>All departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <select
+              value={principalDeptId ?? SCOPE_ALL}
+              onChange={(e) => { setPrincipalDeptId(e.target.value === SCOPE_ALL ? null : e.target.value); setScopeOpen(false); }}
+              onMouseDown={() => setScopeOpen((prev) => !prev)}
+              onBlur={() => setScopeOpen(false)}
+              onKeyDown={(e) => {
+                if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") setScopeOpen(true);
+                if (e.key === "Escape" || e.key === "Tab") setScopeOpen(false);
+              }}
+              style={{ appearance: "none", WebkitAppearance: "none", MozAppearance: "none", padding: "6px 30px 6px 12px", borderRadius: "8px", border: "1.5px solid #e5e7eb", background: "white", fontSize: "12px", fontWeight: 600, color: "var(--brand-primary)", fontFamily: "'Poppins', sans-serif", outline: "none", cursor: "pointer" }}
+            >
+              <option value={SCOPE_ALL}>All departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            {scopeOpen
+              ? <ChevronUp size={14} color="var(--brand-primary)" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              : <ChevronDown size={14} color="var(--brand-primary)" style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />}
+          </div>
           <span style={{ fontSize: "11px", color: "#6b7280", marginLeft: "auto" }}>
             {principalDeptId
               ? "Only users with this role in the selected department will be granted."
